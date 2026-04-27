@@ -1,0 +1,254 @@
+.suppliers-content {
+  gap: 18px;
+  position: relative;
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+.suppliers-tabs {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  border-bottom: 1px solid var(--ds-border);
+  padding: 0 4px;
+}
+
+.suppliers-tab {
+  position: relative;
+  padding: 12px 4px;
+  background: transparent;
+  color: var(--ds-text-muted);
+  font-weight: 500;
+  font-size: 14px;
+  transition: color 0.15s ease;
+}
+
+.suppliers-tab:hover {
+  color: var(--ds-text);
+}
+
+.suppliers-tab--active {
+  color: var(--ds-brand);
+  font-weight: 600;
+}
+
+.suppliers-tab--active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ds-brand);
+}
+
+/* ============================================================
+   CARD
+   ============================================================ */
+.suppliers-card {
+  padding: 22px;
+  display: grid;
+  gap: 18px;
+}
+
+.suppliers-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.suppliers-card__header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ds-text);
+  letter-spacing: -0.01em;
+}
+
+.suppliers-action-button {
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--ds-brand);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 6px 16px rgba(34, 103, 178, 0.25);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.suppliers-action-button:hover {
+  background: var(--ds-brand-600);
+  box-shadow: 0 8px 20px rgba(34, 103, 178, 0.3);
+}
+
+.suppliers-action-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+}
+
+.suppliers-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.suppliers-table thead {
+  background: #f7f9fc;
+}
+
+.suppliers-table th {
+  padding: 14px 16px;
+  text-align: left;
+  color: var(--ds-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--ds-border);
+}
+
+.suppliers-table td {
+  padding: 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--ds-border);
+  color: var(--ds-text);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.suppliers-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.suppliers-table tbody tr:hover {
+  background: #fafbfc;
+}
+
+.suppliers-table__name strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ds-text);
+}
+
+.suppliers-muted {
+  color: var(--ds-text-muted);
+  font-size: 13px;
+}
+
+.suppliers-activity-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.suppliers-activity-summary strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ds-text);
+}
+
+.suppliers-activity-summary span {
+  color: var(--ds-text-muted);
+  font-size: 12px;
+}
+
+.suppliers-table--activities .suppliers-total {
+  color: var(--ds-success);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill-action {
+  min-height: 30px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pill-action--edit {
+  background: var(--ds-brand-tint);
+  color: var(--ds-brand);
+}
+
+.pill-action--edit:hover {
+  background: #d9e7f6;
+}
+
+.pill-action--delete {
+  background: #ef5350;
+  color: #fff;
+}
+
+.pill-action--delete:hover {
+  background: #e53935;
+}
+
+/* ============================================================
+   RECORD SUPPLY MODAL EXTRAS
+   ============================================================ */
+.record-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--ds-brand-tint);
+  margin-top: 4px;
+}
+
+.record-total span {
+  font-size: 14px;
+  color: var(--ds-text-muted);
+  font-weight: 500;
+}
+
+.record-total strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ds-brand);
+}
+
+@media (max-width: 760px) {
+  .suppliers-card {
+    padding: 16px;
+  }
+
+  .suppliers-card__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .suppliers-action-button {
+    width: fit-content;
+  }
+
+  .suppliers-tabs {
+    gap: 14px;
+    overflow-x: auto;
+  }
+}

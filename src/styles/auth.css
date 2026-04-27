@@ -1,0 +1,236 @@
+:root {
+  --auth-blue: #2267b2;
+  --auth-card: #ffffff;
+  --auth-text: #000000;
+  --auth-muted: rgba(0, 0, 0, 0.5);
+  --auth-border: rgba(0, 0, 0, 0.1);
+}
+
+body {
+  background: #f5f7fa;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background-image:
+    linear-gradient(
+      149.383deg,
+      rgb(34, 103, 178) 0%,
+      rgb(33, 101, 174) 12.5%,
+      rgb(32, 98, 170) 25%,
+      rgb(31, 96, 167) 37.5%,
+      rgb(30, 94, 163) 50%,
+      rgb(30, 92, 159) 62.5%,
+      rgb(29, 89, 155) 75%,
+      rgb(28, 87, 152) 87.5%,
+      rgb(27, 85, 148) 100%
+    ),
+    linear-gradient(90deg, rgb(245, 247, 250) 0%, rgb(245, 247, 250) 100%);
+}
+
+.login-hero {
+  width: min(100%, 448px);
+  display: grid;
+  justify-items: center;
+  gap: 32px;
+}
+
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+}
+
+.logo-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+  padding: 10px;
+}
+
+.logo-mark img {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.brand-name {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 36px;
+}
+
+.brand-tagline {
+  margin: 0 0 2px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+}
+
+.login-card {
+  width: 100%;
+  background: var(--auth-card);
+  border-radius: 16px;
+  padding: 32px;
+  border: 1px solid var(--auth-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+  display: grid;
+  gap: 16px;
+}
+
+.login-card h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field__label {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--auth-text);
+}
+
+.field__control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 16px;
+  border: 1px solid var(--auth-border);
+  border-radius: 16px;
+  outline: none;
+  font-size: 16px;
+  color: var(--auth-text);
+  background: #fff;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.input-select:focus {
+  border-color: rgba(34, 103, 178, 0.55);
+  box-shadow: 0 0 0 3px rgba(34, 103, 178, 0.18);
+}
+
+.field__control input {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 16px 8px 40px;
+  border: 1px solid var(--auth-border);
+  border-radius: 16px;
+  outline: none;
+  font-size: 16px;
+  color: var(--auth-text);
+  background: #fff;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.field__control input::placeholder {
+  color: var(--auth-muted);
+}
+
+.field__control input:focus {
+  border-color: rgba(34, 103, 178, 0.55);
+  box-shadow: 0 0 0 3px rgba(34, 103, 178, 0.18);
+}
+
+.input-icon {
+  position: absolute;
+  left: 12px;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.primary-button {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 16px;
+  background: var(--auth-blue);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition: transform 160ms ease, filter 160ms ease;
+}
+
+.primary-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.auth-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.auth-hint {
+  margin: 0;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.signup-copy {
+  margin: 2px 0 0;
+  text-align: center;
+  color: var(--auth-blue);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.signup-copy a {
+  font-weight: 500;
+}
+
+@media (max-width: 480px) {
+  .login-page {
+    padding: 16px;
+  }
+
+  .brand-name {
+    font-size: 26px;
+  }
+
+  .brand-tagline {
+    font-size: 15px;
+  }
+
+  .login-card {
+    padding: 24px;
+    border-radius: 16px;
+  }
+
+  .login-card h1 {
+    font-size: 22px;
+  }
+}

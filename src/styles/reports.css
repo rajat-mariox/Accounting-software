@@ -1,0 +1,395 @@
+.reports-content {
+  gap: 24px;
+}
+
+/* ============================================================
+   PAGE HEADER
+   ============================================================ */
+.reports-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.reports-header .dashboard-heading h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.reports-header .dashboard-heading p {
+  margin: 4px 0 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.reports-export-button {
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: #e8f1fb;
+  color: var(--ds-brand);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.reports-export-button:hover {
+  background: #d6e7f9;
+}
+
+.reports-export-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+.reports-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.reports-tab {
+  position: relative;
+  height: 38px;
+  padding: 0 16px;
+  background: transparent;
+  border: 0;
+  color: #6b7280;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.reports-tab:hover {
+  color: #000000;
+}
+
+.reports-tab--active {
+  color: var(--ds-brand);
+}
+
+.reports-tab--active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ds-brand);
+}
+
+/* ============================================================
+   GRID + CARDS
+   ============================================================ */
+.reports-grid {
+  display: grid;
+  gap: 24px;
+}
+
+.reports-grid--two {
+  grid-template-columns: minmax(0, 544fr) minmax(0, 543fr);
+}
+
+.report-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.1);
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.report-card > h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 600;
+  color: #000000;
+}
+
+.report-card--full {
+  min-height: 490px;
+}
+
+.report-card--table {
+  gap: 0;
+}
+
+.report-card--table > h2 {
+  margin-bottom: 16px;
+}
+
+/* ============================================================
+   CHART
+   ============================================================ */
+.report-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-chart__svg {
+  width: 100%;
+  display: block;
+}
+
+.report-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.report-line__dot {
+  fill: var(--ds-brand);
+  stroke: var(--ds-brand);
+}
+
+.chart-grid line {
+  stroke: rgba(0, 0, 0, 0.08);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.chart-axis__label {
+  fill: #6b7280;
+  font-family: 'Poppins', 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.chart-labels {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.chart-labels span {
+  text-align: center;
+}
+
+.chart-labels--bars {
+  margin-top: -6px;
+}
+
+/* ============================================================
+   TOP CLIENTS
+   ============================================================ */
+.top-clients {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.top-client-row {
+  height: 64px;
+  background: #f5f7fa;
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.top-client-row__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.top-client-row__rank {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  background: var(--ds-brand);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.top-client-row__meta {
+  display: flex;
+  flex-direction: column;
+}
+
+.top-client-row__meta strong {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: #000000;
+}
+
+.top-client-row__meta span {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.top-client-row__amount {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--ds-brand);
+}
+
+/* ============================================================
+   SALES BREAKDOWN TABLE
+   ============================================================ */
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.report-table thead tr {
+  background: #f5f7fa;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.report-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: #000000;
+  white-space: nowrap;
+}
+
+.report-table td {
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  color: #000000;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  vertical-align: middle;
+}
+
+.report-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ============================================================
+   PIE CHART (Inventory tab)
+   ============================================================ */
+.pie-chart {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pie-chart__svg {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  display: block;
+}
+
+.pie-chart__label {
+  font-family: 'Inter', 'Poppins', sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.stock-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stock-summary__card {
+  min-height: 88px;
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stock-summary__card span {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+.stock-summary__card strong {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+}
+
+.stock-summary__card--blue {
+  background: #e8f1fb;
+  color: var(--ds-brand);
+}
+
+.stock-summary__card--green {
+  background: #d1fae5;
+  color: #22c55e;
+}
+
+.stock-summary__card--red {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+@media (max-width: 1180px) {
+  .reports-grid--two {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .reports-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reports-tabs {
+    gap: 2px;
+    overflow-x: auto;
+  }
+
+  .report-card--full {
+    min-height: auto;
+  }
+
+  .report-table {
+    min-width: 720px;
+  }
+}

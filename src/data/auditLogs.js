@@ -1,0 +1,38 @@
+export const auditLogs = [
+  {
+    id: 'log-1',
+    user: 'Admin User',
+    action: 'Update',
+    module: 'Inventory',
+    details: 'Updated item: Laptop Pro 15',
+    timestamp: '05/01/2023, 10:19:47',
+    tone: 'update',
+  },
+  {
+    id: 'log-2',
+    user: 'Admin User',
+    action: 'Delete',
+    module: 'Clients',
+    details: 'Deleted client: Acme Corp',
+    timestamp: '05/01/2023, 10:14:42',
+    tone: 'delete',
+  },
+  {
+    id: 'log-3',
+    user: 'Admin User',
+    action: 'Update',
+    module: 'Clients',
+    details: 'Updated client: TechStart Inc',
+    timestamp: '05/01/2023, 10:12:25',
+    tone: 'update',
+  },
+  {
+    id: 'log-4',
+    user: 'Admin User',
+    action: 'Create',
+    module: 'Clients',
+    details: 'Added new client: Mithu Kumar',
+    timestamp: '05/01/2023, 10:03:59',
+    tone: 'create',
+  },
+];
