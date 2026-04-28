@@ -5,6 +5,13 @@ import { CloseIcon, TrashIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
 import { invoiceCatalog, invoiceClients, invoiceRows } from '../data/invoices';
 import {
+  isDueAfterCreated,
+  isNonEmpty,
+  isPositiveInteger,
+  isValidISODate,
+} from '../utils/validators';
+import useDebouncedValue from '../utils/useDebouncedValue';
+import {
   invoicePlusIconSrc,
   invoiceTotalIconSrc,
   invoicePaidIconSrc,
@@ -22,6 +29,7 @@ import {
 } from '../utils/images';
 import '../styles/dashboard.css';
 import '../styles/invoices.css';
+import '../styles/form-errors.css';
 
 const createDefaults = {
   clientId: invoiceClients[1]?.id ?? '',
@@ -31,18 +39,38 @@ const createDefaults = {
   quantity: '1',
 };
 
+function validateInvoiceForm(form, draftItems) {
+  const errors = {};
+  if (!isNonEmpty(form.clientId)) errors.clientId = 'Select a client.';
+  if (!isValidISODate(form.createdDate)) {
+    errors.createdDate = 'Use the YYYY-MM-DD format.';
+  }
+  if (!isValidISODate(form.dueDate)) {
+    errors.dueDate = 'Use the YYYY-MM-DD format.';
+  } else if (isValidISODate(form.createdDate) && !isDueAfterCreated(form.createdDate, form.dueDate)) {
+    errors.dueDate = 'Due date must be on or after created date.';
+  }
+  if (!draftItems.length) {
+    errors.items = 'Add at least one item to the invoice.';
+  }
+  return errors;
+}
+
 export default function InvoicesPage({ initialAction }) {
   const [invoices, setInvoices] = useState(invoiceRows);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [isModalOpen, setIsModalOpen] = useState(initialAction === 'add');
   const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'create' : null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [createForm, setCreateForm] = useState(createDefaults);
   const [draftItems, setDraftItems] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [createErrors, setCreateErrors] = useState({});
+  const [addItemError, setAddItemError] = useState('');
 
   const filteredInvoices = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = debouncedSearch.trim().toLowerCase();
     if (!query) {
       return invoices;
     }
@@ -53,7 +81,7 @@ export default function InvoicesPage({ initialAction }) {
         .toLowerCase()
         .includes(query),
     );
-  }, [invoices, search]);
+  }, [invoices, debouncedSearch]);
 
   const stats = useMemo(() => {
     const paid = invoices.filter((invoice) => invoice.status === 'paid').length;
@@ -77,6 +105,8 @@ export default function InvoicesPage({ initialAction }) {
     setSelectedInvoice(null);
     setCreateForm(createDefaults);
     setDraftItems([]);
+    setCreateErrors({});
+    setAddItemError('');
     setIsModalOpen(true);
   }
 
@@ -97,10 +127,17 @@ export default function InvoicesPage({ initialAction }) {
     setModalMode(null);
     setSelectedInvoice(null);
     setDeleteTarget(null);
+    setCreateErrors({});
+    setAddItemError('');
   }
 
   function handleCreateInvoice() {
-    if (!draftItems.length) {
+    const validationErrors = validateInvoiceForm(createForm, draftItems);
+    if (Object.keys(validationErrors).length > 0) {
+      setCreateErrors(validationErrors);
+      if (validationErrors.items) {
+        setAddItemError(validationErrors.items);
+      }
       return;
     }
 
@@ -113,8 +150,8 @@ export default function InvoicesPage({ initialAction }) {
     const nextInvoice = {
       id,
       client: client?.name ?? 'New Client',
-      createdDate: createForm.createdDate || '2026-04-16',
-      dueDate: createForm.dueDate || '2026-04-30',
+      createdDate: createForm.createdDate,
+      dueDate: createForm.dueDate,
       amount: total,
       status: 'pending',
       tone: 'pending',
@@ -141,15 +178,27 @@ export default function InvoicesPage({ initialAction }) {
   function handleCreateFieldChange(event) {
     const { name, value } = event.target;
     setCreateForm((current) => ({ ...current, [name]: value }));
+    setCreateErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleAddDraftItem() {
-    const item = invoiceCatalog.find((entry) => entry.id === createForm.itemId) ?? invoiceCatalog[0];
+    const item = invoiceCatalog.find((entry) => entry.id === createForm.itemId);
     if (!item) {
+      setAddItemError('Select an item from the catalog.');
       return;
     }
 
-    const quantity = Math.max(1, Number(createForm.quantity || 1));
+    if (!isPositiveInteger(createForm.quantity)) {
+      setAddItemError('Quantity must be a whole number greater than 0.');
+      return;
+    }
+
+    const quantity = Number(createForm.quantity);
     setDraftItems((current) => [
       ...current,
       {
@@ -161,6 +210,13 @@ export default function InvoicesPage({ initialAction }) {
     ]);
 
     setCreateForm((current) => ({ ...current, quantity: '1' }));
+    setAddItemError('');
+    setCreateErrors((current) => {
+      if (!current.items) return current;
+      const next = { ...current };
+      delete next.items;
+      return next;
+    });
   }
 
   function removeDraftItem(id) {
@@ -319,7 +375,14 @@ export default function InvoicesPage({ initialAction }) {
                   <label className="invoice-field">
                     <span>Select Client</span>
                     <div className="invoice-select">
-                      <select value={createForm.clientId} name="clientId" onChange={handleCreateFieldChange}>
+                      <select
+                        value={createForm.clientId}
+                        name="clientId"
+                        onChange={handleCreateFieldChange}
+                        aria-invalid={Boolean(createErrors.clientId)}
+                        className={createErrors.clientId ? 'field-input--invalid' : ''}
+                      >
+                        <option value="" disabled></option>
                         {invoiceClients.map((client) => (
                           <option key={client.id} value={client.id}>
                             {client.name}
@@ -333,28 +396,41 @@ export default function InvoicesPage({ initialAction }) {
                         className="invoice-select__chevron"
                       />
                     </div>
+                    {createErrors.clientId ? (
+                      <span className="field-error">{createErrors.clientId}</span>
+                    ) : null}
                   </label>
 
                   <label className="invoice-field">
                     <span>Created Date</span>
                     <input
-                      type="text"
+                      type="date"
                       name="createdDate"
                       value={createForm.createdDate}
                       onChange={handleCreateFieldChange}
-                      placeholder="DD/MM/YYYY"
+                      placeholder="YYYY-MM-DD"
+                      aria-invalid={Boolean(createErrors.createdDate)}
+                      className={createErrors.createdDate ? 'field-input--invalid' : ''}
                     />
+                    {createErrors.createdDate ? (
+                      <span className="field-error">{createErrors.createdDate}</span>
+                    ) : null}
                   </label>
 
                   <label className="invoice-field">
                     <span>Due Date</span>
                     <input
-                      type="text"
+                      type="date"
                       name="dueDate"
                       value={createForm.dueDate}
                       onChange={handleCreateFieldChange}
-                      placeholder="DD/MM/YYYY"
+                      placeholder="YYYY-MM-DD"
+                      aria-invalid={Boolean(createErrors.dueDate)}
+                      className={createErrors.dueDate ? 'field-input--invalid' : ''}
                     />
+                    {createErrors.dueDate ? (
+                      <span className="field-error">{createErrors.dueDate}</span>
+                    ) : null}
                   </label>
                 </div>
 
@@ -383,9 +459,12 @@ export default function InvoicesPage({ initialAction }) {
                     <input
                       type="number"
                       min="1"
+                      step="1"
                       name="quantity"
                       value={createForm.quantity}
                       onChange={handleCreateFieldChange}
+                      aria-invalid={Boolean(addItemError)}
+                      className={addItemError ? 'field-input--invalid' : ''}
                     />
                   </label>
 
@@ -393,6 +472,7 @@ export default function InvoicesPage({ initialAction }) {
                     <img src={invoiceAddItemIconSrc} alt="" aria-hidden="true" />
                   </button>
                 </div>
+                {addItemError ? <span className="field-error">{addItemError}</span> : null}
 
                 {draftItems.length ? (
                   <div className="invoice-lines">

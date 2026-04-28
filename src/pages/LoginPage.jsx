@@ -1,22 +1,39 @@
 import React, { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import BrandLockup from '../components/BrandLockup';
 import AuthField from '../components/AuthField';
 import { userRoles } from '../data/settings';
 import { DEFAULT_PASSWORD, setStoredUser } from '../utils/auth';
 import { loginLockIconSrc, loginMailIconSrc } from '../utils/images';
+import { isNonEmpty, isValidEmail } from '../utils/validators';
 import '../styles/auth.css';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const users = useMemo(() => userRoles, []);
   const [email, setEmail] = useState(users[0]?.email ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  const redirectTo = location.state?.from ?? '/dashboard';
+
   function handleSubmit(event) {
     event.preventDefault();
     setError('');
+
+    if (!isNonEmpty(email)) {
+      setError('Email is required.');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (!isNonEmpty(password)) {
+      setError('Password is required.');
+      return;
+    }
 
     const normalizedEmail = email.trim().toLowerCase();
     const user = users.find((entry) => entry.email.toLowerCase() === normalizedEmail);
@@ -31,7 +48,7 @@ export default function LoginPage() {
     }
 
     setStoredUser(user);
-    navigate('/dashboard');
+    navigate(redirectTo, { replace: true });
   }
 
   return (

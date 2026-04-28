@@ -8,6 +8,7 @@ import {
 import { sidebarItems } from '../data/dashboard';
 import { paymentInvoices, paymentModes, paymentRows } from '../data/payments';
 import { formatCurrency } from '../utils/formatters';
+import { isNonEmpty, isPositiveNumber, isValidISODate } from '../utils/validators';
 import {
   invoicePlusIconSrc,
   paymentTotalIconSrc,
@@ -17,6 +18,7 @@ import {
 } from '../utils/images';
 import '../styles/dashboard.css';
 import '../styles/payments.css';
+import '../styles/form-errors.css';
 
 const defaultForm = {
   invoiceId: paymentInvoices[0]?.id ?? '',
@@ -26,10 +28,27 @@ const defaultForm = {
   date: '',
 };
 
+function validatePaymentForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.invoiceId)) errors.invoiceId = 'Select an invoice.';
+  if (!isPositiveNumber(form.amount)) {
+    errors.amount = 'Amount must be greater than 0.';
+  }
+  if (!isNonEmpty(form.mode)) errors.mode = 'Select a payment mode.';
+  if (!isNonEmpty(form.reference)) {
+    errors.reference = 'Reference number is required.';
+  }
+  if (!isValidISODate(form.date)) {
+    errors.date = 'Select a valid date.';
+  }
+  return errors;
+}
+
 export default function PaymentsPage({ initialAction }) {
   const [payments, setPayments] = useState(paymentRows);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState(defaultForm);
+  const [errors, setErrors] = useState({});
   const [selectedFileName, setSelectedFileName] = useState('');
 
   useEffect(() => {
@@ -41,6 +60,7 @@ export default function PaymentsPage({ initialAction }) {
         reference: 'TXN-001',
         date: '',
       });
+      setErrors({});
       setSelectedFileName('');
       setIsModalOpen(true);
     }
@@ -65,17 +85,25 @@ export default function PaymentsPage({ initialAction }) {
       reference: 'TXN-001',
       date: '',
     });
+    setErrors({});
     setSelectedFileName('');
     setIsModalOpen(true);
   }
 
   function closeModal() {
     setIsModalOpen(false);
+    setErrors({});
   }
 
   function handleChange(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleFileChange(event) {
@@ -85,15 +113,20 @@ export default function PaymentsPage({ initialAction }) {
 
   function handleSubmit(event) {
     event.preventDefault();
+    const validationErrors = validatePaymentForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
     const invoice = paymentInvoices.find((entry) => entry.id === form.invoiceId) ?? paymentInvoices[0];
 
     const payment = {
       id: `pay-${String(payments.length + 1).padStart(3, '0')}`,
-      invoiceId: invoice?.id ?? 'inv1',
-      date: form.date || '2026-04-22',
-      amount: Number(form.amount || invoice?.amount || 0),
+      invoiceId: invoice?.id ?? form.invoiceId,
+      date: form.date,
+      amount: Number(form.amount),
       mode: form.mode,
-      reference: form.reference || `TXN-${String(payments.length + 1).padStart(3, '0')}`,
+      reference: form.reference,
     };
 
     setPayments((current) => [payment, ...current]);
@@ -174,12 +207,19 @@ export default function PaymentsPage({ initialAction }) {
               </button>
             </div>
 
-            <form className="payments-form" onSubmit={handleSubmit}>
+            <form className="payments-form" onSubmit={handleSubmit} noValidate>
               <div className="payments-modal__body">
                 <label className="payments-field">
                   <span>Select Invoice</span>
                   <div className="payments-select">
-                    <select name="invoiceId" value={form.invoiceId} onChange={handleChange}>
+                    <select
+                      name="invoiceId"
+                      value={form.invoiceId}
+                      onChange={handleChange}
+                      aria-invalid={Boolean(errors.invoiceId)}
+                      className={errors.invoiceId ? 'field-input--invalid' : ''}
+                    >
+                      <option value="" disabled></option>
                       {paymentInvoices.map((invoice) => (
                         <option key={invoice.id} value={invoice.id}>
                           {invoice.id} - {invoice.client}
@@ -188,17 +228,35 @@ export default function PaymentsPage({ initialAction }) {
                     </select>
                     <ChevronDownIcon />
                   </div>
+                  {errors.invoiceId ? <span className="field-error">{errors.invoiceId}</span> : null}
                 </label>
 
                 <label className="payments-field">
                   <span>Amount</span>
-                  <input type="number" name="amount" value={form.amount} onChange={handleChange} placeholder="0" />
+                  <input
+                    type="number"
+                    name="amount"
+                    value={form.amount}
+                    onChange={handleChange}
+                    placeholder="0"
+                    min="0.01"
+                    step="0.01"
+                    aria-invalid={Boolean(errors.amount)}
+                    className={errors.amount ? 'field-input--invalid' : ''}
+                  />
+                  {errors.amount ? <span className="field-error">{errors.amount}</span> : null}
                 </label>
 
                 <label className="payments-field">
                   <span>Payment Mode</span>
                   <div className="payments-select">
-                    <select name="mode" value={form.mode} onChange={handleChange}>
+                    <select
+                      name="mode"
+                      value={form.mode}
+                      onChange={handleChange}
+                      aria-invalid={Boolean(errors.mode)}
+                      className={errors.mode ? 'field-input--invalid' : ''}
+                    >
                       {paymentModes.map((mode) => (
                         <option key={mode} value={mode}>
                           {mode}
@@ -207,16 +265,34 @@ export default function PaymentsPage({ initialAction }) {
                     </select>
                     <ChevronDownIcon />
                   </div>
+                  {errors.mode ? <span className="field-error">{errors.mode}</span> : null}
                 </label>
 
                 <label className="payments-field">
                   <span>Reference Number</span>
-                  <input name="reference" value={form.reference} onChange={handleChange} placeholder="TXN-001" />
+                  <input
+                    name="reference"
+                    value={form.reference}
+                    onChange={handleChange}
+                    placeholder="TXN-001"
+                    aria-invalid={Boolean(errors.reference)}
+                    className={errors.reference ? 'field-input--invalid' : ''}
+                  />
+                  {errors.reference ? <span className="field-error">{errors.reference}</span> : null}
                 </label>
 
                 <label className="payments-field">
                   <span>Date</span>
-                  <input type="text" name="date" value={form.date} onChange={handleChange} placeholder="" />
+                  <input
+                    type="date"
+                    name="date"
+                    value={form.date}
+                    onChange={handleChange}
+                    placeholder="YYYY-MM-DD"
+                    aria-invalid={Boolean(errors.date)}
+                    className={errors.date ? 'field-input--invalid' : ''}
+                  />
+                  {errors.date ? <span className="field-error">{errors.date}</span> : null}
                 </label>
 
                 <label className="payments-upload">

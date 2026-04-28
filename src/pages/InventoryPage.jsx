@@ -10,9 +10,16 @@ import {
   transferWhiteIconSrc,
   transferEmptyIconSrc,
 } from '../utils/images';
+import {
+  isNonEmpty,
+  isNonNegativeNumber,
+  isPositiveInteger,
+  isPositiveNumber,
+} from '../utils/validators';
 import '../styles/dashboard.css';
 import '../styles/clients.css';
 import '../styles/inventory.css';
+import '../styles/form-errors.css';
 
 const emptyForm = {
   name: '',
@@ -35,6 +42,48 @@ const emptyStockAdjustForm = {
   quantity: '',
 };
 
+function validateItemForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.name)) errors.name = 'Item name is required.';
+  if (!isNonEmpty(form.unit)) errors.unit = 'Unit is required.';
+  if (!isPositiveNumber(form.price)) {
+    errors.price = 'Price must be greater than 0.';
+  }
+  if (!isNonNegativeNumber(form.stock)) {
+    errors.stock = 'Stock must be 0 or greater.';
+  } else if (!Number.isInteger(Number(form.stock))) {
+    errors.stock = 'Stock must be a whole number.';
+  }
+  if (!isNonNegativeNumber(form.threshold)) {
+    errors.threshold = 'Threshold must be 0 or greater.';
+  } else if (!Number.isInteger(Number(form.threshold))) {
+    errors.threshold = 'Threshold must be a whole number.';
+  }
+  if (!isNonEmpty(form.warehouse)) {
+    errors.warehouse = 'Select a warehouse.';
+  }
+  return errors;
+}
+
+function validateWarehouseForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.name)) errors.name = 'Warehouse name is required.';
+  if (!isNonEmpty(form.location)) errors.location = 'Location is required.';
+  if (!isPositiveInteger(form.capacity)) {
+    errors.capacity = 'Capacity must be a whole number greater than 0.';
+  }
+  return errors;
+}
+
+function validateStockAdjustForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.itemId)) errors.itemId = 'Select an item.';
+  if (!isPositiveInteger(form.quantity)) {
+    errors.quantity = 'Quantity must be a whole number greater than 0.';
+  }
+  return errors;
+}
+
 export default function InventoryPage({ initialAction }) {
   const [activeTab, setActiveTab] = useState('items');
   const [items, setItems] = useState(inventoryItems);
@@ -45,6 +94,9 @@ export default function InventoryPage({ initialAction }) {
   const [form, setForm] = useState(emptyForm);
   const [warehouseForm, setWarehouseForm] = useState(emptyWarehouseForm);
   const [stockAdjustForm, setStockAdjustForm] = useState(emptyStockAdjustForm);
+  const [errors, setErrors] = useState({});
+  const [warehouseErrors, setWarehouseErrors] = useState({});
+  const [stockErrors, setStockErrors] = useState({});
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -56,35 +108,56 @@ export default function InventoryPage({ initialAction }) {
   function handleChange(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleWarehouseChange(event) {
     const { name, value } = event.target;
     setWarehouseForm((current) => ({ ...current, [name]: value }));
+    setWarehouseErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function openAddWarehouse() {
     setWarehouseForm(emptyWarehouseForm);
+    setWarehouseErrors({});
     setModalMode('warehouse-add');
   }
 
   function handleStockAdjustChange(event) {
     const { name, value } = event.target;
     setStockAdjustForm((current) => ({ ...current, [name]: value }));
+    setStockErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function openStockAdjust() {
     setStockAdjustForm({ ...emptyStockAdjustForm, itemId: items[0]?.id ?? '' });
+    setStockErrors({});
     setModalMode('stock-adjust');
   }
 
   function handleStockAdjustSubmit(event) {
     event.preventDefault();
-    const qty = Math.max(0, Number(stockAdjustForm.quantity) || 0);
-    if (!stockAdjustForm.itemId || qty === 0) {
-      closeModal();
+    const validationErrors = validateStockAdjustForm(stockAdjustForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setStockErrors(validationErrors);
       return;
     }
+    const qty = Number(stockAdjustForm.quantity);
     const delta = stockAdjustForm.type === 'out' ? -qty : qty;
     setItems((current) =>
       current.map((row) => {
@@ -97,29 +170,37 @@ export default function InventoryPage({ initialAction }) {
       }),
     );
     setStockAdjustForm(emptyStockAdjustForm);
+    setStockErrors({});
     setModalMode(null);
     setToast('Stock adjusted successfully');
   }
 
   function handleWarehouseSubmit(event) {
     event.preventDefault();
-    const slug = `${warehouseForm.name || 'warehouse'}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const validationErrors = validateWarehouseForm(warehouseForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setWarehouseErrors(validationErrors);
+      return;
+    }
+    const slug = `${warehouseForm.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const next = {
       id: slug,
-      name: warehouseForm.name || 'New Warehouse',
-      location: warehouseForm.location || '',
+      name: warehouseForm.name,
+      location: warehouseForm.location,
       totalItems: 0,
       totalStock: 0,
-      capacity: Number(warehouseForm.capacity) || 0,
+      capacity: Number(warehouseForm.capacity),
     };
     setWarehouses((current) => [...current, next]);
     setWarehouseForm(emptyWarehouseForm);
+    setWarehouseErrors({});
     setModalMode(null);
     setToast('Warehouse added successfully');
   }
 
   function openAdd() {
     setForm(emptyForm);
+    setErrors({});
     setEditingId(null);
     setModalMode('add');
   }
@@ -134,6 +215,7 @@ export default function InventoryPage({ initialAction }) {
       threshold: String(row.threshold ?? 10),
       warehouse: row.warehouse,
     });
+    setErrors({});
     setModalMode('edit');
   }
 
@@ -146,13 +228,21 @@ export default function InventoryPage({ initialAction }) {
     setModalMode(null);
     setEditingId(null);
     setDeletingItem(null);
+    setErrors({});
+    setWarehouseErrors({});
+    setStockErrors({});
   }
 
   function handleSubmit(event) {
     event.preventDefault();
-    const price = Number(form.price) || 0;
-    const stock = Number(form.stock) || 0;
-    const threshold = Number(form.threshold) || 0;
+    const validationErrors = validateItemForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+    const price = Number(form.price);
+    const stock = Number(form.stock);
+    const threshold = Number(form.threshold);
     const statusTone = stock <= threshold ? 'danger' : 'success';
     const status = statusTone === 'danger' ? 'Low Stock' : 'In Stock';
 
@@ -176,15 +266,15 @@ export default function InventoryPage({ initialAction }) {
       );
       setToast('Item updated successfully');
     } else {
-      const slug = `${form.name || 'item'}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const slug = `${form.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       const next = {
         id: slug,
-        name: form.name || 'New Item',
-        unit: form.unit || 'piece',
+        name: form.name,
+        unit: form.unit,
         price,
         stock,
         threshold,
-        warehouse: form.warehouse || 'Main Warehouse',
+        warehouse: form.warehouse,
         status,
         statusTone,
       };
@@ -281,6 +371,7 @@ export default function InventoryPage({ initialAction }) {
             title={modalMode === 'edit' ? 'Edit Item' : 'Add New Item'}
             submitLabel={modalMode === 'edit' ? 'Update Item' : 'Add Item'}
             form={form}
+            errors={errors}
             warehouses={warehouses}
             onChange={handleChange}
             onCancel={closeModal}
@@ -291,6 +382,7 @@ export default function InventoryPage({ initialAction }) {
         {modalMode === 'warehouse-add' ? (
           <WarehouseFormModal
             form={warehouseForm}
+            errors={warehouseErrors}
             onChange={handleWarehouseChange}
             onCancel={closeModal}
             onSubmit={handleWarehouseSubmit}
@@ -300,6 +392,7 @@ export default function InventoryPage({ initialAction }) {
         {modalMode === 'stock-adjust' ? (
           <AdjustStockModal
             form={stockAdjustForm}
+            errors={stockErrors}
             items={items}
             onChange={handleStockAdjustChange}
             onCancel={closeModal}
@@ -336,7 +429,7 @@ function TransfersEmpty() {
   );
 }
 
-function AdjustStockModal({ form, items, onChange, onCancel, onSubmit }) {
+function AdjustStockModal({ form, errors = {}, items, onChange, onCancel, onSubmit }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -358,17 +451,25 @@ function AdjustStockModal({ form, items, onChange, onCancel, onSubmit }) {
           </button>
         </div>
 
-        <form className="app-modal__form" onSubmit={onSubmit}>
+        <form className="app-modal__form" onSubmit={onSubmit} noValidate>
           <div className="app-modal__body">
             <label className="app-modal-field">
               <span>Item</span>
-              <select name="itemId" value={form.itemId} onChange={onChange} required>
+              <select
+                name="itemId"
+                value={form.itemId}
+                onChange={onChange}
+                aria-invalid={Boolean(errors.itemId)}
+                className={errors.itemId ? 'field-input--invalid' : ''}
+              >
+                <option value="" disabled></option>
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
                 ))}
               </select>
+              {errors.itemId ? <span className="field-error">{errors.itemId}</span> : null}
             </label>
 
             <label className="app-modal-field">
@@ -386,9 +487,13 @@ function AdjustStockModal({ form, items, onChange, onCancel, onSubmit }) {
                 value={form.quantity}
                 onChange={onChange}
                 type="number"
-                min="0"
+                min="1"
+                step="1"
                 placeholder="0"
+                aria-invalid={Boolean(errors.quantity)}
+                className={errors.quantity ? 'field-input--invalid' : ''}
               />
+              {errors.quantity ? <span className="field-error">{errors.quantity}</span> : null}
             </label>
           </div>
 
@@ -488,7 +593,7 @@ function WarehousesGrid({ rows }) {
   );
 }
 
-function WarehouseFormModal({ form, onChange, onCancel, onSubmit }) {
+function WarehouseFormModal({ form, errors = {}, onChange, onCancel, onSubmit }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -505,7 +610,7 @@ function WarehouseFormModal({ form, onChange, onCancel, onSubmit }) {
           </button>
         </div>
 
-        <form className="client-form" onSubmit={onSubmit}>
+        <form className="client-form" onSubmit={onSubmit} noValidate>
           <label className="client-field">
             <span>Name</span>
             <input
@@ -514,8 +619,10 @@ function WarehouseFormModal({ form, onChange, onCancel, onSubmit }) {
               onChange={onChange}
               type="text"
               placeholder="Warehouse name"
-              required
+              aria-invalid={Boolean(errors.name)}
+              className={errors.name ? 'field-input--invalid' : ''}
             />
+            {errors.name ? <span className="field-error">{errors.name}</span> : null}
           </label>
 
           <label className="client-field">
@@ -526,7 +633,10 @@ function WarehouseFormModal({ form, onChange, onCancel, onSubmit }) {
               onChange={onChange}
               type="text"
               placeholder="City, State"
+              aria-invalid={Boolean(errors.location)}
+              className={errors.location ? 'field-input--invalid' : ''}
             />
+            {errors.location ? <span className="field-error">{errors.location}</span> : null}
           </label>
 
           <label className="client-field">
@@ -536,9 +646,13 @@ function WarehouseFormModal({ form, onChange, onCancel, onSubmit }) {
               value={form.capacity}
               onChange={onChange}
               type="number"
-              min="0"
+              min="1"
+              step="1"
               placeholder="0"
+              aria-invalid={Boolean(errors.capacity)}
+              className={errors.capacity ? 'field-input--invalid' : ''}
             />
+            {errors.capacity ? <span className="field-error">{errors.capacity}</span> : null}
           </label>
 
           <div className="client-form__actions">
@@ -607,7 +721,7 @@ function EmptyTab({ label }) {
   );
 }
 
-function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCancel, onSubmit }) {
+function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, onChange, onCancel, onSubmit }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -624,7 +738,7 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
           </button>
         </div>
 
-        <form className="app-modal__form" onSubmit={onSubmit}>
+        <form className="app-modal__form" onSubmit={onSubmit} noValidate>
           <div className="app-modal__body">
             <label className="app-modal-field">
               <span>Name</span>
@@ -634,8 +748,10 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
                 onChange={onChange}
                 type="text"
                 placeholder="Item name"
-                required
+                aria-invalid={Boolean(errors.name)}
+                className={errors.name ? 'field-input--invalid' : ''}
               />
+              {errors.name ? <span className="field-error">{errors.name}</span> : null}
             </label>
 
             <label className="app-modal-field">
@@ -646,7 +762,10 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
                 onChange={onChange}
                 type="text"
                 placeholder="piece"
+                aria-invalid={Boolean(errors.unit)}
+                className={errors.unit ? 'field-input--invalid' : ''}
               />
+              {errors.unit ? <span className="field-error">{errors.unit}</span> : null}
             </label>
 
             <label className="app-modal-field">
@@ -656,10 +775,13 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
                 value={form.price}
                 onChange={onChange}
                 type="number"
-                min="0"
+                min="0.01"
                 step="0.01"
                 placeholder="0"
+                aria-invalid={Boolean(errors.price)}
+                className={errors.price ? 'field-input--invalid' : ''}
               />
+              {errors.price ? <span className="field-error">{errors.price}</span> : null}
             </label>
 
             <label className="app-modal-field">
@@ -670,8 +792,12 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
                 onChange={onChange}
                 type="number"
                 min="0"
+                step="1"
                 placeholder="0"
+                aria-invalid={Boolean(errors.stock)}
+                className={errors.stock ? 'field-input--invalid' : ''}
               />
+              {errors.stock ? <span className="field-error">{errors.stock}</span> : null}
             </label>
 
             <label className="app-modal-field">
@@ -682,13 +808,23 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
                 onChange={onChange}
                 type="number"
                 min="0"
+                step="1"
                 placeholder="10"
+                aria-invalid={Boolean(errors.threshold)}
+                className={errors.threshold ? 'field-input--invalid' : ''}
               />
+              {errors.threshold ? <span className="field-error">{errors.threshold}</span> : null}
             </label>
 
             <label className="app-modal-field">
               <span>Warehouse</span>
-              <select name="warehouse" value={form.warehouse} onChange={onChange}>
+              <select
+                name="warehouse"
+                value={form.warehouse}
+                onChange={onChange}
+                aria-invalid={Boolean(errors.warehouse)}
+                className={errors.warehouse ? 'field-input--invalid' : ''}
+              >
                 <option value=""></option>
                 {warehouses.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.name}>
@@ -696,6 +832,7 @@ function ItemFormModal({ title, submitLabel, form, warehouses, onChange, onCance
                   </option>
                 ))}
               </select>
+              {errors.warehouse ? <span className="field-error">{errors.warehouse}</span> : null}
             </label>
           </div>
 

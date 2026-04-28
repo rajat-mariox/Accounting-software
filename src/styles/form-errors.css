@@ -1,0 +1,22 @@
+.field-error {
+  display: block;
+  margin-top: 4px;
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.field-input--invalid,
+.client-field input.field-input--invalid,
+.client-field select.field-input--invalid,
+.app-modal-field input.field-input--invalid,
+.app-modal-field select.field-input--invalid,
+.invoice-field input.field-input--invalid,
+.invoice-field select.field-input--invalid,
+.payments-field input.field-input--invalid,
+.payments-field select.field-input--invalid,
+.users-form-field input.field-input--invalid,
+.users-form-field select.field-input--invalid {
+  border-color: #dc2626 !important;
+  outline-color: #dc2626;
+}

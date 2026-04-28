@@ -17,8 +17,11 @@ import {
 import { sidebarItems } from '../data/dashboard';
 import { clientRows } from '../data/clients';
 import { formatCurrency } from '../utils/formatters';
+import { isNonEmpty, isValidEmail, isValidPhone, sanitizePhoneInput } from '../utils/validators';
+import useDebouncedValue from '../utils/useDebouncedValue';
 import '../styles/clients.css';
 import '../styles/dashboard.css';
+import '../styles/form-errors.css';
 
 const emptyForm = {
   name: '',
@@ -28,12 +31,38 @@ const emptyForm = {
   address: '',
 };
 
+function validateClientForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.name)) {
+    errors.name = 'Name is required.';
+  }
+  if (!isNonEmpty(form.email)) {
+    errors.email = 'Email is required.';
+  } else if (!isValidEmail(form.email)) {
+    errors.email = 'Enter a valid email address.';
+  }
+  if (!isNonEmpty(form.phone)) {
+    errors.phone = 'Phone is required.';
+  } else if (!isValidPhone(form.phone)) {
+    errors.phone = 'Phone must be exactly 10 digits.';
+  }
+  if (!isNonEmpty(form.company)) {
+    errors.company = 'Company is required.';
+  }
+  if (!isNonEmpty(form.address)) {
+    errors.address = 'Address is required.';
+  }
+  return errors;
+}
+
 export default function ClientsPage({ initialAction }) {
   const [clients, setClients] = useState(clientRows);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'add' : null);
   const [selectedClient, setSelectedClient] = useState(clients[0]);
   const [form, setForm] = useState(emptyForm);
+  const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -46,7 +75,7 @@ export default function ClientsPage({ initialAction }) {
   }, [toast]);
 
   const filteredClients = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = debouncedSearch.trim().toLowerCase();
     if (!query) {
       return clients;
     }
@@ -57,10 +86,11 @@ export default function ClientsPage({ initialAction }) {
         .toLowerCase()
         .includes(query),
     );
-  }, [clients, search]);
+  }, [clients, debouncedSearch]);
 
   function openAddModal() {
     setForm(emptyForm);
+    setErrors({});
     setModalMode('add');
   }
 
@@ -74,10 +104,11 @@ export default function ClientsPage({ initialAction }) {
     setForm({
       name: client.name,
       email: client.email,
-      phone: client.phone,
+      phone: sanitizePhoneInput(client.phone),
       company: client.company,
       address: client.address,
     });
+    setErrors({});
     setModalMode('edit');
   }
 
@@ -88,6 +119,7 @@ export default function ClientsPage({ initialAction }) {
 
   function closeModal() {
     setModalMode(null);
+    setErrors({});
   }
 
   function showToast(message) {
@@ -96,22 +128,40 @@ export default function ClientsPage({ initialAction }) {
 
   function handleFieldChange(event) {
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    const nextValue = name === 'phone' ? sanitizePhoneInput(value) : value;
+    setForm((current) => ({ ...current, [name]: nextValue }));
+    setErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleAddSubmit(event) {
     event.preventDefault();
+    const validationErrors = validateClientForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
     const nextClient = createClientFromForm(form);
 
     setClients((current) => [nextClient, ...current]);
     setSelectedClient(nextClient);
     setModalMode(null);
+    setErrors({});
     setForm(emptyForm);
     showToast('Client added successfully');
   }
 
   function handleEditSubmit(event) {
     event.preventDefault();
+    const validationErrors = validateClientForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
 
     setClients((current) =>
       current.map((client) =>
@@ -137,6 +187,7 @@ export default function ClientsPage({ initialAction }) {
       address: form.address,
     }));
     setModalMode(null);
+    setErrors({});
     showToast('Client updated successfully');
   }
 
@@ -263,7 +314,13 @@ export default function ClientsPage({ initialAction }) {
 
           {modalMode === 'add' ? (
             <ClientModal onBackdrop={closeModal} title="Add New Client">
-              <ClientForm form={form} onChange={handleFieldChange} onCancel={closeModal} onSubmit={handleAddSubmit} />
+              <ClientForm
+                form={form}
+                errors={errors}
+                onChange={handleFieldChange}
+                onCancel={closeModal}
+                onSubmit={handleAddSubmit}
+              />
             </ClientModal>
           ) : null}
 
@@ -271,6 +328,7 @@ export default function ClientsPage({ initialAction }) {
             <ClientModal onBackdrop={closeModal} title="Edit Client">
               <ClientForm
                 form={form}
+                errors={errors}
                 onChange={handleFieldChange}
                 onCancel={closeModal}
                 onSubmit={handleEditSubmit}
@@ -350,12 +408,21 @@ function ClientModal({ title, children, onBackdrop, widthClass = '', headerActio
   );
 }
 
-function ClientForm({ form, onChange, onCancel, onSubmit, submitLabel = 'Add Client' }) {
+function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLabel = 'Add Client' }) {
   return (
-    <form className="client-form" onSubmit={onSubmit}>
+    <form className="client-form" onSubmit={onSubmit} noValidate>
       <label className="client-field">
         <span>Name</span>
-        <input name="name" value={form.name} onChange={onChange} type="text" placeholder="Enter client name" />
+        <input
+          name="name"
+          value={form.name}
+          onChange={onChange}
+          type="text"
+          placeholder="Enter client name"
+          aria-invalid={Boolean(errors.name)}
+          className={errors.name ? 'field-input--invalid' : ''}
+        />
+        {errors.name ? <span className="field-error">{errors.name}</span> : null}
       </label>
 
       <label className="client-field">
@@ -366,12 +433,27 @@ function ClientForm({ form, onChange, onCancel, onSubmit, submitLabel = 'Add Cli
           onChange={onChange}
           type="email"
           placeholder="Enter email address"
+          aria-invalid={Boolean(errors.email)}
+          className={errors.email ? 'field-input--invalid' : ''}
         />
+        {errors.email ? <span className="field-error">{errors.email}</span> : null}
       </label>
 
       <label className="client-field">
         <span>Phone</span>
-        <input name="phone" value={form.phone} onChange={onChange} type="tel" placeholder="Enter phone number" />
+        <input
+          name="phone"
+          value={form.phone}
+          onChange={onChange}
+          type="tel"
+          inputMode="numeric"
+          maxLength={10}
+          pattern="\d{10}"
+          placeholder="10-digit phone number"
+          aria-invalid={Boolean(errors.phone)}
+          className={errors.phone ? 'field-input--invalid' : ''}
+        />
+        {errors.phone ? <span className="field-error">{errors.phone}</span> : null}
       </label>
 
       <label className="client-field">
@@ -382,7 +464,10 @@ function ClientForm({ form, onChange, onCancel, onSubmit, submitLabel = 'Add Cli
           onChange={onChange}
           type="text"
           placeholder="Enter company name"
+          aria-invalid={Boolean(errors.company)}
+          className={errors.company ? 'field-input--invalid' : ''}
         />
+        {errors.company ? <span className="field-error">{errors.company}</span> : null}
       </label>
 
       <label className="client-field">
@@ -393,7 +478,10 @@ function ClientForm({ form, onChange, onCancel, onSubmit, submitLabel = 'Add Cli
           onChange={onChange}
           type="text"
           placeholder="Enter address"
+          aria-invalid={Boolean(errors.address)}
+          className={errors.address ? 'field-input--invalid' : ''}
         />
+        {errors.address ? <span className="field-error">{errors.address}</span> : null}
       </label>
 
       <div className="client-form__actions">

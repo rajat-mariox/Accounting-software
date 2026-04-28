@@ -6,9 +6,19 @@ import { sidebarItems } from '../data/dashboard';
 import { supplierRows as seedSuppliers, supplyActivityRows as seedActivities } from '../data/suppliers';
 import { inventoryItems } from '../data/inventory';
 import { formatCurrency } from '../utils/formatters';
+import {
+  isNonEmpty,
+  isPositiveInteger,
+  isPositiveNumber,
+  isValidEmail,
+  isValidISODate,
+  isValidPhone,
+  sanitizePhoneInput,
+} from '../utils/validators';
 import '../styles/dashboard.css';
 import '../styles/clients.css';
 import '../styles/suppliers.css';
+import '../styles/form-errors.css';
 
 const tabOptions = [
   { id: 'suppliers', label: 'Suppliers' },
@@ -32,6 +42,39 @@ const emptyActivityForm = {
   date: '',
 };
 
+function validateSupplierForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.name)) errors.name = 'Supplier name is required.';
+  if (!isNonEmpty(form.company)) errors.company = 'Company is required.';
+  if (!isNonEmpty(form.email)) {
+    errors.email = 'Email is required.';
+  } else if (!isValidEmail(form.email)) {
+    errors.email = 'Enter a valid email address.';
+  }
+  if (!isNonEmpty(form.phone)) {
+    errors.phone = 'Phone is required.';
+  } else if (!isValidPhone(form.phone)) {
+    errors.phone = 'Phone must be exactly 10 digits.';
+  }
+  return errors;
+}
+
+function validateActivityForm(form) {
+  const errors = {};
+  if (!isNonEmpty(form.supplier)) errors.supplier = 'Select a supplier.';
+  if (!isNonEmpty(form.item)) errors.item = 'Select an item.';
+  if (!isPositiveInteger(form.quantity)) {
+    errors.quantity = 'Quantity must be a whole number greater than 0.';
+  }
+  if (!isPositiveNumber(form.pricePerUnit)) {
+    errors.pricePerUnit = 'Price per unit must be greater than 0.';
+  }
+  if (!isValidISODate(form.date)) {
+    errors.date = 'Select a valid date.';
+  }
+  return errors;
+}
+
 export default function SuppliersPage() {
   const [activeTab, setActiveTab] = useState('suppliers');
   const [suppliers, setSuppliers] = useState(seedSuppliers);
@@ -42,6 +85,8 @@ export default function SuppliersPage() {
   const [isRecordOpen, setIsRecordOpen] = useState(false);
   const [form, setForm] = useState(emptySupplierForm);
   const [activityForm, setActivityForm] = useState(emptyActivityForm);
+  const [errors, setErrors] = useState({});
+  const [activityErrors, setActivityErrors] = useState({});
   const [toast, setToast] = useState(null);
 
   const isAddOpen = modalMode === 'add';
@@ -55,36 +100,60 @@ export default function SuppliersPage() {
 
   function handleFieldChange(event) {
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    const nextValue = name === 'phone' ? sanitizePhoneInput(value) : value;
+    setForm((current) => ({ ...current, [name]: nextValue }));
+    setErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleActivityChange(event) {
     const { name, value } = event.target;
     setActivityForm((current) => ({ ...current, [name]: value }));
+    setActivityErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleSubmit(event) {
     event.preventDefault();
-    const slug = `${form.name || 'supplier'}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const validationErrors = validateSupplierForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+    const slug = `${form.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const next = {
       id: slug,
-      name: form.name || 'New Supplier',
-      company: form.company || form.name || 'New Company',
-      email: form.email || '',
-      phone: form.phone || '',
-      address: form.address || '',
+      name: form.name,
+      company: form.company,
+      email: form.email,
+      phone: form.phone,
+      address: form.address,
       activities: 0,
       total: 0,
     };
 
     setSuppliers((current) => [next, ...current]);
     setForm(emptySupplierForm);
+    setErrors({});
     setModalMode(null);
     setToast('Supplier added successfully');
   }
 
   function handleUpdate(event) {
     event.preventDefault();
+    const validationErrors = validateSupplierForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
     setSuppliers((current) =>
       current.map((row) =>
         row.id === editingId
@@ -100,6 +169,7 @@ export default function SuppliersPage() {
       ),
     );
     setForm(emptySupplierForm);
+    setErrors({});
     setEditingId(null);
     setModalMode(null);
     setToast('Supplier updated successfully');
@@ -115,8 +185,13 @@ export default function SuppliersPage() {
 
   function handleRecordSubmit(event) {
     event.preventDefault();
-    const quantity = Number(activityForm.quantity) || 0;
-    const pricePerUnit = Number(activityForm.pricePerUnit) || 0;
+    const validationErrors = validateActivityForm(activityForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setActivityErrors(validationErrors);
+      return;
+    }
+    const quantity = Number(activityForm.quantity);
+    const pricePerUnit = Number(activityForm.pricePerUnit);
     const totalAmount = quantity * pricePerUnit;
     const slug = `sup-${Date.now()}`.toLowerCase();
 
@@ -132,12 +207,14 @@ export default function SuppliersPage() {
 
     setActivities((current) => [next, ...current]);
     setActivityForm(emptyActivityForm);
+    setActivityErrors({});
     setIsRecordOpen(false);
     setToast('Supply activity recorded successfully');
   }
 
   function openAdd() {
     setForm(emptySupplierForm);
+    setErrors({});
     setModalMode('add');
   }
 
@@ -147,9 +224,10 @@ export default function SuppliersPage() {
       name: row.name,
       company: row.company,
       email: row.email,
-      phone: row.phone,
+      phone: sanitizePhoneInput(row.phone),
       address: row.address,
     });
+    setErrors({});
     setModalMode('edit');
   }
 
@@ -162,15 +240,18 @@ export default function SuppliersPage() {
     setModalMode(null);
     setEditingId(null);
     setDeletingSupplier(null);
+    setErrors({});
   }
 
   function openRecord() {
     setActivityForm(emptyActivityForm);
+    setActivityErrors({});
     setIsRecordOpen(true);
   }
 
   function closeRecord() {
     setIsRecordOpen(false);
+    setActivityErrors({});
   }
 
   return (
@@ -234,6 +315,7 @@ export default function SuppliersPage() {
             title={isEditOpen ? 'Edit Supplier' : 'Add New Supplier'}
             submitLabel={isEditOpen ? 'Update Supplier' : 'Add Supplier'}
             form={form}
+            errors={errors}
             onChange={handleFieldChange}
             onCancel={closeModal}
             onSubmit={isEditOpen ? handleUpdate : handleSubmit}
@@ -251,6 +333,7 @@ export default function SuppliersPage() {
         {isRecordOpen ? (
           <RecordSupplyModal
             form={activityForm}
+            errors={activityErrors}
             suppliers={suppliers}
             items={inventoryItems}
             onChange={handleActivityChange}
@@ -263,7 +346,7 @@ export default function SuppliersPage() {
   );
 }
 
-function SupplierFormModal({ title, submitLabel, form, onChange, onCancel, onSubmit }) {
+function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, onCancel, onSubmit }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -280,7 +363,7 @@ function SupplierFormModal({ title, submitLabel, form, onChange, onCancel, onSub
           </button>
         </div>
 
-        <form className="client-form" onSubmit={onSubmit}>
+        <form className="client-form" onSubmit={onSubmit} noValidate>
           <label className="client-field">
             <span>
               Supplier Name<span className="client-field__required">*</span>
@@ -291,8 +374,10 @@ function SupplierFormModal({ title, submitLabel, form, onChange, onCancel, onSub
               onChange={onChange}
               type="text"
               placeholder="Enter supplier name"
-              required
+              aria-invalid={Boolean(errors.name)}
+              className={errors.name ? 'field-input--invalid' : ''}
             />
+            {errors.name ? <span className="field-error">{errors.name}</span> : null}
           </label>
 
           <label className="client-field">
@@ -305,8 +390,10 @@ function SupplierFormModal({ title, submitLabel, form, onChange, onCancel, onSub
               onChange={onChange}
               type="text"
               placeholder="Enter company name"
-              required
+              aria-invalid={Boolean(errors.company)}
+              className={errors.company ? 'field-input--invalid' : ''}
             />
+            {errors.company ? <span className="field-error">{errors.company}</span> : null}
           </label>
 
           <label className="client-field">
@@ -319,19 +406,29 @@ function SupplierFormModal({ title, submitLabel, form, onChange, onCancel, onSub
               onChange={onChange}
               type="email"
               placeholder="Enter email"
-              required
+              aria-invalid={Boolean(errors.email)}
+              className={errors.email ? 'field-input--invalid' : ''}
             />
+            {errors.email ? <span className="field-error">{errors.email}</span> : null}
           </label>
 
           <label className="client-field">
-            <span>Phone</span>
+            <span>
+              Phone<span className="client-field__required">*</span>
+            </span>
             <input
               name="phone"
               value={form.phone}
               onChange={onChange}
               type="tel"
-              placeholder="Enter phone number"
+              inputMode="numeric"
+              maxLength={10}
+              pattern="\d{10}"
+              placeholder="10-digit phone number"
+              aria-invalid={Boolean(errors.phone)}
+              className={errors.phone ? 'field-input--invalid' : ''}
             />
+            {errors.phone ? <span className="field-error">{errors.phone}</span> : null}
           </label>
 
           <label className="client-field">
@@ -399,7 +496,7 @@ function DeleteSupplierDialog({ supplier, onCancel, onDelete }) {
   );
 }
 
-function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmit }) {
+function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCancel, onSubmit }) {
   const quantity = Number(form.quantity) || 0;
   const pricePerUnit = Number(form.pricePerUnit) || 0;
   const total = quantity * pricePerUnit;
@@ -420,12 +517,18 @@ function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmi
           </button>
         </div>
 
-        <form className="client-form" onSubmit={onSubmit}>
+        <form className="client-form" onSubmit={onSubmit} noValidate>
           <label className="client-field">
             <span>
               Supplier<span className="client-field__required">*</span>
             </span>
-            <select name="supplier" value={form.supplier} onChange={onChange} required>
+            <select
+              name="supplier"
+              value={form.supplier}
+              onChange={onChange}
+              aria-invalid={Boolean(errors.supplier)}
+              className={errors.supplier ? 'field-input--invalid' : ''}
+            >
               <option value="" disabled></option>
               {suppliers.map((supplier) => (
                 <option key={supplier.id} value={supplier.name}>
@@ -433,13 +536,20 @@ function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmi
                 </option>
               ))}
             </select>
+            {errors.supplier ? <span className="field-error">{errors.supplier}</span> : null}
           </label>
 
           <label className="client-field">
             <span>
               Item<span className="client-field__required">*</span>
             </span>
-            <select name="item" value={form.item} onChange={onChange} required>
+            <select
+              name="item"
+              value={form.item}
+              onChange={onChange}
+              aria-invalid={Boolean(errors.item)}
+              className={errors.item ? 'field-input--invalid' : ''}
+            >
               <option value="" disabled></option>
               {items.map((item) => (
                 <option key={item.id} value={item.name}>
@@ -447,6 +557,7 @@ function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmi
                 </option>
               ))}
             </select>
+            {errors.item ? <span className="field-error">{errors.item}</span> : null}
           </label>
 
           <label className="client-field">
@@ -456,12 +567,15 @@ function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmi
             <input
               name="quantity"
               type="number"
-              min="0"
+              min="1"
+              step="1"
               placeholder="0"
               value={form.quantity}
               onChange={onChange}
-              required
+              aria-invalid={Boolean(errors.quantity)}
+              className={errors.quantity ? 'field-input--invalid' : ''}
             />
+            {errors.quantity ? <span className="field-error">{errors.quantity}</span> : null}
           </label>
 
           <label className="client-field">
@@ -471,13 +585,15 @@ function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmi
             <input
               name="pricePerUnit"
               type="number"
-              min="0"
+              min="0.01"
               step="0.01"
               placeholder="0"
               value={form.pricePerUnit}
               onChange={onChange}
-              required
+              aria-invalid={Boolean(errors.pricePerUnit)}
+              className={errors.pricePerUnit ? 'field-input--invalid' : ''}
             />
+            {errors.pricePerUnit ? <span className="field-error">{errors.pricePerUnit}</span> : null}
           </label>
 
           <label className="client-field">
@@ -500,8 +616,10 @@ function RecordSupplyModal({ form, suppliers, items, onChange, onCancel, onSubmi
               type="date"
               value={form.date}
               onChange={onChange}
-              required
+              aria-invalid={Boolean(errors.date)}
+              className={errors.date ? 'field-input--invalid' : ''}
             />
+            {errors.date ? <span className="field-error">{errors.date}</span> : null}
           </label>
 
           <div className="record-total">
