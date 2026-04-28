@@ -28,10 +28,10 @@ const emptyForm = {
   address: '',
 };
 
-export default function ClientsPage() {
+export default function ClientsPage({ initialAction }) {
   const [clients, setClients] = useState(clientRows);
   const [search, setSearch] = useState('');
-  const [modalMode, setModalMode] = useState(null);
+  const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'add' : null);
   const [selectedClient, setSelectedClient] = useState(clients[0]);
   const [form, setForm] = useState(emptyForm);
   const [toast, setToast] = useState(null);

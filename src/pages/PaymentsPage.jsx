@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import {
@@ -26,11 +26,25 @@ const defaultForm = {
   date: '',
 };
 
-export default function PaymentsPage() {
+export default function PaymentsPage({ initialAction }) {
   const [payments, setPayments] = useState(paymentRows);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState(defaultForm);
   const [selectedFileName, setSelectedFileName] = useState('');
+
+  useEffect(() => {
+    if (initialAction === 'add') {
+      setForm({
+        invoiceId: paymentInvoices.find((invoice) => invoice.status !== 'paid')?.id ?? paymentInvoices[0]?.id ?? '',
+        amount: '',
+        mode: paymentModes[0],
+        reference: 'TXN-001',
+        date: '',
+      });
+      setSelectedFileName('');
+      setIsModalOpen(true);
+    }
+  }, [initialAction]);
 
   const totals = useMemo(() => {
     const received = payments.reduce((sum, payment) => sum + payment.amount, 0);

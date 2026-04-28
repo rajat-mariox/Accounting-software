@@ -136,6 +136,21 @@ export function ViewIcon() {
   );
 }
 
+export function EyeOffIcon() {
+  return (
+    <Icon>
+      <path
+        d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10 10 0 0 1 12 5c4.5 0 8.2 3.3 9.5 7a13.1 13.1 0 0 1-2.6 3.7M6.3 6.3A12.6 12.6 0 0 0 2.5 12c1.3 3.7 5 7 9.5 7a9.9 9.9 0 0 0 5.1-1.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Icon>
+  );
+}
+
 export function CalendarIcon() {
   return (
     <Icon>
@@ -442,6 +457,21 @@ export function PinOutlineIcon() {
   return (
     <Icon>
       <path d="M12 4.6a4.5 4.5 0 0 0-4.5 4.5c0 3.5 4.5 8.4 4.5 8.4s4.5-4.9 4.5-8.4A4.5 4.5 0 0 0 12 4.6Zm0 6.2a1.7 1.7 0 1 1 1.7-1.7 1.7 1.7 0 0 1-1.7 1.7Z" fill="currentColor" />
+    </Icon>
+  );
+}
+
+export function UsersRolesIcon() {
+  return (
+    <Icon>
+      <path
+        d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm13 9v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Icon>
   );
 }

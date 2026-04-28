@@ -14,7 +14,12 @@ export default function QuickActions({ title, subtitle, actions }) {
         {actions.map((action) => {
           const Icon = action.icon;
           return (
-            <button key={action.label} type="button" className="quick-action-card">
+            <button
+              key={action.label}
+              type="button"
+              className="quick-action-card"
+              onClick={action.onClick}
+            >
               <Icon />
               <span>{action.label}</span>
             </button>

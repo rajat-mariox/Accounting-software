@@ -47,6 +47,16 @@ import reportExportIconSrc from './report-export.svg';
 import settingsCompanyIconSrc from './settings-company.svg';
 import auditFilterIconSrc from './audit-filter.svg';
 import invoiceLineTrashIconSrc from './invoice-line-trash.svg';
+import usersTotalIconSrc from './users-total.svg';
+import usersActiveIconSrc from './users-active.svg';
+import usersInactiveIconSrc from './users-inactive.svg';
+import usersRolesShieldIconSrc from './users-roles-shield.svg';
+import usersAddIconSrc from './users-add.svg';
+import usersMailIconSrc from './users-mail.svg';
+import usersPhoneIconSrc from './users-phone.svg';
+import usersCalendarIconSrc from './users-calendar.svg';
+import usersModalChevronIconSrc from './users-modal-chevron.svg';
+import usersModalBulletIconSrc from './users-modal-bullet.svg';
 
 export {
   addressIconSrc,
@@ -98,4 +108,14 @@ export {
   reportExportIconSrc,
   settingsCompanyIconSrc,
   auditFilterIconSrc,
+  usersTotalIconSrc,
+  usersActiveIconSrc,
+  usersInactiveIconSrc,
+  usersRolesShieldIconSrc,
+  usersAddIconSrc,
+  usersMailIconSrc,
+  usersPhoneIconSrc,
+  usersCalendarIconSrc,
+  usersModalChevronIconSrc,
+  usersModalBulletIconSrc,
 };

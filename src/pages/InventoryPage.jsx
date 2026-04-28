@@ -35,11 +35,11 @@ const emptyStockAdjustForm = {
   quantity: '',
 };
 
-export default function InventoryPage() {
+export default function InventoryPage({ initialAction }) {
   const [activeTab, setActiveTab] = useState('items');
   const [items, setItems] = useState(inventoryItems);
   const [warehouses, setWarehouses] = useState(seedWarehouses);
-  const [modalMode, setModalMode] = useState(null); // 'add' | 'edit' | 'delete' | 'warehouse-add' | null
+  const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'add' : null); // 'add' | 'edit' | 'delete' | 'warehouse-add' | null
   const [editingId, setEditingId] = useState(null);
   const [deletingItem, setDeletingItem] = useState(null);
   const [form, setForm] = useState(emptyForm);

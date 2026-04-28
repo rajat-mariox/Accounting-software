@@ -31,11 +31,11 @@ const createDefaults = {
   quantity: '1',
 };
 
-export default function InvoicesPage() {
+export default function InvoicesPage({ initialAction }) {
   const [invoices, setInvoices] = useState(invoiceRows);
   const [search, setSearch] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(initialAction === 'add');
+  const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'create' : null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [createForm, setCreateForm] = useState(createDefaults);
   const [draftItems, setDraftItems] = useState([]);

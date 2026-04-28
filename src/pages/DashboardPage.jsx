@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import AlertBanner from '../components/dashboard/AlertBanner';
@@ -18,12 +19,32 @@ import {
 } from '../data/dashboard';
 import '../styles/dashboard.css';
 
+const alertPaths = {
+  'Low Stock Alert': '/inventory',
+  'Overdue Invoices': '/invoices',
+};
+
+const quickActionPaths = {
+  'Add Client': '/clients/add',
+  'Add Item': '/items/add',
+  'New Invoice': '/invoices/add',
+  'Record Payment': '/payments/add',
+};
+
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [alerts, setAlerts] = useState(seedAlerts);
 
   const dismissAlert = (title) => {
     setAlerts((prev) => prev.filter((alert) => alert.title !== title));
   };
+
+  const linkedQuickActions = quickActions.map((action) => ({
+    ...action,
+    onClick: quickActionPaths[action.label]
+      ? () => navigate(quickActionPaths[action.label])
+      : undefined,
+  }));
 
   return (
     <main className="dashboard-shell">
@@ -52,6 +73,7 @@ export default function DashboardPage() {
                   key={alert.title}
                   {...alert}
                   onDismiss={() => dismissAlert(alert.title)}
+                  onClick={alertPaths[alert.title] ? () => navigate(alertPaths[alert.title]) : undefined}
                 />
               ))}
             </div>
@@ -60,7 +82,7 @@ export default function DashboardPage() {
           <QuickActions
             title="Quick Actions"
             subtitle="Common tasks to get you started"
-            actions={quickActions}
+            actions={linkedQuickActions}
           />
 
           <section className="stat-grid">
