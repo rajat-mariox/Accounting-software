@@ -1,16 +1,74 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BellIcon, ChevronDownIcon, SearchIcon } from './icons';
 import NotificationPanel from './NotificationPanel';
-import { notifications } from '../../data/dashboard';
-import { clearStoredUser, getStoredUser } from '../../utils/auth';
+import { notificationsApi } from '../../api';
+import { clearStoredAuth, getStoredUser, getStoredToken } from '../../utils/auth';
+
+const POLL_INTERVAL_MS = 30_000;
+
+function buildInitials(name) {
+  return (name || '')
+    .split(' ')
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
 
 export default function DashboardTopbar({ user }) {
   const navigate = useNavigate();
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [storedUser, setStoredUserState] = useState(() => getStoredUser());
   const notifWrapRef = useRef(null);
   const userMenuRef = useRef(null);
+
+  useEffect(() => {
+    function syncUser() {
+      setStoredUserState(getStoredUser());
+    }
+    window.addEventListener('storage', syncUser);
+    window.addEventListener('auth-changed', syncUser);
+    return () => {
+      window.removeEventListener('storage', syncUser);
+      window.removeEventListener('auth-changed', syncUser);
+    };
+  }, []);
+
+  const refreshUnreadCount = useCallback(async () => {
+    if (!getStoredToken()) return;
+    try {
+      const { count } = await notificationsApi.unreadCount();
+      setUnreadCount(count || 0);
+    } catch {
+      // soft-fail; bell badge stays at last known value
+    }
+  }, []);
+
+  const refreshList = useCallback(async () => {
+    if (!getStoredToken()) return;
+    try {
+      const rows = await notificationsApi.list({ limit: 20 });
+      setNotifications(rows);
+      setUnreadCount(rows.filter((n) => !n.read).length);
+    } catch {
+      // soft-fail
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUnreadCount();
+    const id = window.setInterval(refreshUnreadCount, POLL_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [refreshUnreadCount]);
+
+  useEffect(() => {
+    if (isNotifOpen) refreshList();
+  }, [isNotifOpen, refreshList]);
 
   useEffect(() => {
     if (!isNotifOpen && !isUserMenuOpen) return undefined;
@@ -41,11 +99,40 @@ export default function DashboardTopbar({ user }) {
 
   function handleLogout() {
     setIsUserMenuOpen(false);
-    clearStoredUser();
+    clearStoredAuth();
     navigate('/login');
   }
 
-  const sessionUser = user ?? getStoredUser() ?? { initials: 'A', name: 'Admin User', role: 'Administrator' };
+  async function handleNotificationClick(note) {
+    setIsNotifOpen(false);
+    if (note && !note.read) {
+      try {
+        await notificationsApi.markRead(note.id);
+        setNotifications((current) =>
+          current.map((n) => (n.id === note.id ? { ...n, read: true } : n)),
+        );
+        setUnreadCount((c) => Math.max(0, c - 1));
+      } catch {
+        // ignore
+      }
+    }
+    if (note?.link) navigate(note.link);
+  }
+
+  async function handleMarkAllRead() {
+    try {
+      await notificationsApi.markAllRead();
+      setNotifications((current) => current.map((n) => ({ ...n, read: true })));
+      setUnreadCount(0);
+    } catch {
+      // ignore
+    }
+  }
+
+  const sessionUser = user ?? storedUser;
+  const displayName = sessionUser?.name || sessionUser?.email || 'Signed-out user';
+  const displayRole = sessionUser?.role || (sessionUser ? '—' : 'Not signed in');
+  const displayInitials = sessionUser?.initials || buildInitials(displayName);
 
   return (
     <header className="dashboard-topbar">
@@ -59,18 +146,21 @@ export default function DashboardTopbar({ user }) {
           <button
             className={`topbar-icon${isNotifOpen ? ' topbar-icon--active' : ''}`}
             type="button"
-            aria-label="Notifications"
+            aria-label={`Notifications (${unreadCount} unread)`}
             aria-haspopup="dialog"
             aria-expanded={isNotifOpen}
             onClick={() => setIsNotifOpen((open) => !open)}
           >
             <BellIcon />
-            {notifications.length > 0 && <span className="topbar-icon__dot" />}
+            {unreadCount > 0 && <span className="topbar-icon__dot" />}
           </button>
 
           {isNotifOpen && (
             <NotificationPanel
               notifications={notifications}
+              unreadCount={unreadCount}
+              onItemClick={handleNotificationClick}
+              onMarkAllRead={handleMarkAllRead}
               onClose={() => setIsNotifOpen(false)}
             />
           )}
@@ -85,11 +175,11 @@ export default function DashboardTopbar({ user }) {
             onClick={() => setIsUserMenuOpen((open) => !open)}
           >
             <span className="user-chip__avatar" aria-hidden="true">
-              {sessionUser.initials}
+              {displayInitials}
             </span>
             <span className="user-chip__meta">
-              <strong>{sessionUser.name}</strong>
-              <span>{sessionUser.role}</span>
+              <strong>{displayName}</strong>
+              <span>{displayRole}</span>
             </span>
             <ChevronDownIcon />
           </button>

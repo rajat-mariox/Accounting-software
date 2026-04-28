@@ -3,8 +3,7 @@ import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { CheckCircleIcon, CloseIcon, PlusIcon, TrashIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
-import { supplierRows as seedSuppliers, supplyActivityRows as seedActivities } from '../data/suppliers';
-import { inventoryItems } from '../data/inventory';
+import { suppliersApi, inventoryApi } from '../api';
 import { formatCurrency } from '../utils/formatters';
 import {
   isNonEmpty,
@@ -75,12 +74,22 @@ function validateActivityForm(form) {
   return errors;
 }
 
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
+
 export default function SuppliersPage() {
   const [activeTab, setActiveTab] = useState('suppliers');
-  const [suppliers, setSuppliers] = useState(seedSuppliers);
-  const [activities, setActivities] = useState(seedActivities);
-  const [modalMode, setModalMode] = useState(null); // 'add' | 'edit' | 'delete' | null
-  const [editingId, setEditingId] = useState(null);
+  const [suppliers, setSuppliers] = useState([]);
+  const [activities, setActivities] = useState([]);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [modalMode, setModalMode] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [deletingSupplier, setDeletingSupplier] = useState(null);
   const [isRecordOpen, setIsRecordOpen] = useState(false);
   const [form, setForm] = useState(emptySupplierForm);
@@ -88,9 +97,27 @@ export default function SuppliersPage() {
   const [errors, setErrors] = useState({});
   const [activityErrors, setActivityErrors] = useState({});
   const [toast, setToast] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const isAddOpen = modalMode === 'add';
   const isEditOpen = modalMode === 'edit';
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([suppliersApi.list(), suppliersApi.listActivities(), inventoryApi.list()])
+      .then(([suppliersRows, activityRows, itemRows]) => {
+        if (cancelled) return;
+        setSuppliers(suppliersRows);
+        setActivities(activityRows);
+        setItems(itemRows);
+      })
+      .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load suppliers'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -121,95 +148,103 @@ export default function SuppliersPage() {
     });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     const validationErrors = validateSupplierForm(form);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
-    const slug = `${form.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const next = {
-      id: slug,
-      name: form.name,
-      company: form.company,
-      email: form.email,
-      phone: form.phone,
-      address: form.address,
-      activities: 0,
-      total: 0,
-    };
-
-    setSuppliers((current) => [next, ...current]);
-    setForm(emptySupplierForm);
-    setErrors({});
-    setModalMode(null);
-    setToast('Supplier added successfully');
+    setSubmitting(true);
+    try {
+      const created = await suppliersApi.create(form);
+      setSuppliers((current) => [created, ...current]);
+      setForm(emptySupplierForm);
+      setErrors({});
+      setModalMode(null);
+      setToast('Supplier added successfully');
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not add supplier' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleUpdate(event) {
+  async function handleUpdate(event) {
     event.preventDefault();
     const validationErrors = validateSupplierForm(form);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
-    setSuppliers((current) =>
-      current.map((row) =>
-        row.id === editingId
-          ? {
-              ...row,
-              name: form.name,
-              company: form.company,
-              email: form.email,
-              phone: form.phone,
-              address: form.address,
-            }
-          : row,
-      ),
-    );
-    setForm(emptySupplierForm);
-    setErrors({});
-    setEditingId(null);
-    setModalMode(null);
-    setToast('Supplier updated successfully');
+    setSubmitting(true);
+    try {
+      const updated = await suppliersApi.update(editing.id, form);
+      setSuppliers((current) =>
+        current.map((row) => (row.id === editing.id ? { ...row, ...updated } : row)),
+      );
+      setForm(emptySupplierForm);
+      setErrors({});
+      setEditing(null);
+      setModalMode(null);
+      setToast('Supplier updated successfully');
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not update supplier' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!deletingSupplier) return;
-    setSuppliers((current) => current.filter((row) => row.id !== deletingSupplier.id));
-    setDeletingSupplier(null);
-    setModalMode(null);
-    setToast('Supplier deleted successfully');
+    setSubmitting(true);
+    try {
+      await suppliersApi.remove(deletingSupplier.id);
+      setSuppliers((current) => current.filter((row) => row.id !== deletingSupplier.id));
+      setDeletingSupplier(null);
+      setModalMode(null);
+      setToast('Supplier deleted successfully');
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not delete supplier' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleRecordSubmit(event) {
+  async function handleRecordSubmit(event) {
     event.preventDefault();
     const validationErrors = validateActivityForm(activityForm);
     if (Object.keys(validationErrors).length > 0) {
       setActivityErrors(validationErrors);
       return;
     }
-    const quantity = Number(activityForm.quantity);
-    const pricePerUnit = Number(activityForm.pricePerUnit);
-    const totalAmount = quantity * pricePerUnit;
-    const slug = `sup-${Date.now()}`.toLowerCase();
-
-    const next = {
-      id: activityForm.invoice ? activityForm.invoice.toLowerCase() : slug,
-      date: activityForm.date,
-      supplier: activityForm.supplier,
-      item: activityForm.item,
-      quantity,
-      pricePerUnit,
-      totalAmount,
-    };
-
-    setActivities((current) => [next, ...current]);
-    setActivityForm(emptyActivityForm);
-    setActivityErrors({});
-    setIsRecordOpen(false);
-    setToast('Supply activity recorded successfully');
+    setSubmitting(true);
+    try {
+      const payload = {
+        supplier: activityForm.supplier,
+        item: activityForm.item,
+        quantity: Number(activityForm.quantity),
+        pricePerUnit: Number(activityForm.pricePerUnit),
+        date: activityForm.date,
+      };
+      const created = await suppliersApi.createActivity(payload);
+      setActivities((current) => [created, ...current]);
+      // refresh supplier aggregates
+      try {
+        const refreshed = await suppliersApi.list();
+        setSuppliers(refreshed);
+      } catch {
+        // ignore
+      }
+      setActivityForm(emptyActivityForm);
+      setActivityErrors({});
+      setIsRecordOpen(false);
+      setToast('Supply activity recorded successfully');
+    } catch (err) {
+      setActivityErrors({ form: err.message || 'Could not record supply' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function openAdd() {
@@ -219,13 +254,13 @@ export default function SuppliersPage() {
   }
 
   function openEdit(row) {
-    setEditingId(row.id);
+    setEditing(row);
     setForm({
-      name: row.name,
-      company: row.company,
-      email: row.email,
-      phone: sanitizePhoneInput(row.phone),
-      address: row.address,
+      name: row.name || '',
+      company: row.company || '',
+      email: row.email || '',
+      phone: sanitizePhoneInput(row.phone || ''),
+      address: row.address || '',
     });
     setErrors({});
     setModalMode('edit');
@@ -238,7 +273,7 @@ export default function SuppliersPage() {
 
   function closeModal() {
     setModalMode(null);
-    setEditingId(null);
+    setEditing(null);
     setDeletingSupplier(null);
     setErrors({});
   }
@@ -302,7 +337,10 @@ export default function SuppliersPage() {
               </button>
             </div>
 
-            {activeTab === 'suppliers' ? (
+            {loadError ? <p className="auth-error">{loadError}</p> : null}
+            {loading ? (
+              <p>Loading…</p>
+            ) : activeTab === 'suppliers' ? (
               <SuppliersTable rows={suppliers} onEdit={openEdit} onDelete={openDelete} />
             ) : (
               <SupplyActivitiesTable rows={activities} />
@@ -319,6 +357,7 @@ export default function SuppliersPage() {
             onChange={handleFieldChange}
             onCancel={closeModal}
             onSubmit={isEditOpen ? handleUpdate : handleSubmit}
+            submitting={submitting}
           />
         ) : null}
 
@@ -327,6 +366,7 @@ export default function SuppliersPage() {
             supplier={deletingSupplier}
             onCancel={closeModal}
             onDelete={handleDelete}
+            submitting={submitting}
           />
         ) : null}
 
@@ -335,10 +375,11 @@ export default function SuppliersPage() {
             form={activityForm}
             errors={activityErrors}
             suppliers={suppliers}
-            items={inventoryItems}
+            items={items}
             onChange={handleActivityChange}
             onCancel={closeRecord}
             onSubmit={handleRecordSubmit}
+            submitting={submitting}
           />
         ) : null}
       </section>
@@ -346,7 +387,7 @@ export default function SuppliersPage() {
   );
 }
 
-function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, onCancel, onSubmit }) {
+function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, onCancel, onSubmit, submitting }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -365,9 +406,7 @@ function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, on
 
         <form className="client-form" onSubmit={onSubmit} noValidate>
           <label className="client-field">
-            <span>
-              Supplier Name<span className="client-field__required">*</span>
-            </span>
+            <span>Supplier Name<span className="client-field__required">*</span></span>
             <input
               name="name"
               value={form.name}
@@ -381,9 +420,7 @@ function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, on
           </label>
 
           <label className="client-field">
-            <span>
-              Company<span className="client-field__required">*</span>
-            </span>
+            <span>Company<span className="client-field__required">*</span></span>
             <input
               name="company"
               value={form.company}
@@ -397,9 +434,7 @@ function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, on
           </label>
 
           <label className="client-field">
-            <span>
-              Email<span className="client-field__required">*</span>
-            </span>
+            <span>Email<span className="client-field__required">*</span></span>
             <input
               name="email"
               value={form.email}
@@ -413,9 +448,7 @@ function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, on
           </label>
 
           <label className="client-field">
-            <span>
-              Phone<span className="client-field__required">*</span>
-            </span>
+            <span>Phone<span className="client-field__required">*</span></span>
             <input
               name="phone"
               value={form.phone}
@@ -442,12 +475,14 @@ function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, on
             />
           </label>
 
+          {errors.form ? <span className="field-error">{errors.form}</span> : null}
+
           <div className="client-form__actions">
-            <button type="button" className="modal-text-button" onClick={onCancel}>
+            <button type="button" className="modal-text-button" onClick={onCancel} disabled={submitting}>
               Cancel
             </button>
-            <button type="submit" className="modal-primary-button">
-              {submitLabel}
+            <button type="submit" className="modal-primary-button" disabled={submitting}>
+              {submitting ? 'Saving…' : submitLabel}
             </button>
           </div>
         </form>
@@ -456,7 +491,7 @@ function SupplierFormModal({ title, submitLabel, form, errors = {}, onChange, on
   );
 }
 
-function DeleteSupplierDialog({ supplier, onCancel, onDelete }) {
+function DeleteSupplierDialog({ supplier, onCancel, onDelete, submitting }) {
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -483,11 +518,11 @@ function DeleteSupplierDialog({ supplier, onCancel, onDelete }) {
             </p>
           </div>
           <div className="client-form__actions">
-            <button type="button" className="modal-text-button" onClick={onCancel}>
+            <button type="button" className="modal-text-button" onClick={onCancel} disabled={submitting}>
               Cancel
             </button>
-            <button type="button" className="modal-delete-button" onClick={onDelete}>
-              Delete
+            <button type="button" className="modal-delete-button" onClick={onDelete} disabled={submitting}>
+              {submitting ? 'Deleting…' : 'Delete'}
             </button>
           </div>
         </div>
@@ -496,7 +531,7 @@ function DeleteSupplierDialog({ supplier, onCancel, onDelete }) {
   );
 }
 
-function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCancel, onSubmit }) {
+function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCancel, onSubmit, submitting }) {
   const quantity = Number(form.quantity) || 0;
   const pricePerUnit = Number(form.pricePerUnit) || 0;
   const total = quantity * pricePerUnit;
@@ -519,9 +554,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
 
         <form className="client-form" onSubmit={onSubmit} noValidate>
           <label className="client-field">
-            <span>
-              Supplier<span className="client-field__required">*</span>
-            </span>
+            <span>Supplier<span className="client-field__required">*</span></span>
             <select
               name="supplier"
               value={form.supplier}
@@ -531,7 +564,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
             >
               <option value="" disabled></option>
               {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.name}>
+                <option key={supplier.id} value={supplier.id}>
                   {supplier.name}
                 </option>
               ))}
@@ -540,9 +573,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
           </label>
 
           <label className="client-field">
-            <span>
-              Item<span className="client-field__required">*</span>
-            </span>
+            <span>Item<span className="client-field__required">*</span></span>
             <select
               name="item"
               value={form.item}
@@ -561,9 +592,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
           </label>
 
           <label className="client-field">
-            <span>
-              Quantity<span className="client-field__required">*</span>
-            </span>
+            <span>Quantity<span className="client-field__required">*</span></span>
             <input
               name="quantity"
               type="number"
@@ -579,9 +608,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
           </label>
 
           <label className="client-field">
-            <span>
-              Price per Unit<span className="client-field__required">*</span>
-            </span>
+            <span>Price per Unit<span className="client-field__required">*</span></span>
             <input
               name="pricePerUnit"
               type="number"
@@ -608,9 +635,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
           </label>
 
           <label className="client-field">
-            <span>
-              Date<span className="client-field__required">*</span>
-            </span>
+            <span>Date<span className="client-field__required">*</span></span>
             <input
               name="date"
               type="date"
@@ -622,17 +647,19 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
             {errors.date ? <span className="field-error">{errors.date}</span> : null}
           </label>
 
+          {errors.form ? <span className="field-error">{errors.form}</span> : null}
+
           <div className="record-total">
             <span>Total Amount:</span>
             <strong>{formatCurrency(total)}</strong>
           </div>
 
           <div className="client-form__actions">
-            <button type="button" className="modal-text-button" onClick={onCancel}>
+            <button type="button" className="modal-text-button" onClick={onCancel} disabled={submitting}>
               Cancel
             </button>
-            <button type="submit" className="modal-primary-button">
-              Record Supply
+            <button type="submit" className="modal-primary-button" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Record Supply'}
             </button>
           </div>
         </form>
@@ -657,41 +684,45 @@ function SuppliersTable({ rows, onEdit, onDelete }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td className="suppliers-table__name">
-                <strong>{row.name}</strong>
-              </td>
-              <td>{row.company}</td>
-              <td className="suppliers-muted">{row.email}</td>
-              <td className="suppliers-muted">{row.phone}</td>
-              <td className="suppliers-muted">{row.address}</td>
-              <td>
-                <div className="suppliers-activity-summary">
-                  <strong>{row.activities} supplies</strong>
-                  <span>{formatCurrency(row.total)} total</span>
-                </div>
-              </td>
-              <td>
-                <div className="row-actions">
-                  <button
-                    type="button"
-                    className="pill-action pill-action--edit"
-                    onClick={() => onEdit(row)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="pill-action pill-action--delete"
-                    onClick={() => onDelete(row)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
+          {rows.length === 0 ? (
+            <tr><td colSpan="7">No suppliers yet.</td></tr>
+          ) : (
+            rows.map((row) => (
+              <tr key={row.id}>
+                <td className="suppliers-table__name">
+                  <strong>{row.name}</strong>
+                </td>
+                <td>{row.company}</td>
+                <td className="suppliers-muted">{row.email}</td>
+                <td className="suppliers-muted">{row.phone}</td>
+                <td className="suppliers-muted">{row.address}</td>
+                <td>
+                  <div className="suppliers-activity-summary">
+                    <strong>{row.activities ?? 0} supplies</strong>
+                    <span>{formatCurrency(row.total ?? 0)} total</span>
+                  </div>
+                </td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="pill-action pill-action--edit"
+                      onClick={() => onEdit(row)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="pill-action pill-action--delete"
+                      onClick={() => onDelete(row)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>
@@ -714,19 +745,23 @@ function SupplyActivitiesTable({ rows }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td className="suppliers-muted">{row.date}</td>
-              <td className="suppliers-table__name">
-                <strong>{row.supplier}</strong>
-              </td>
-              <td className="suppliers-muted">{row.item}</td>
-              <td className="suppliers-muted">{row.quantity}</td>
-              <td className="suppliers-muted">{formatUnitPrice(row.pricePerUnit)}</td>
-              <td className="suppliers-total">{formatCurrency(row.totalAmount)}</td>
-              <td className="suppliers-muted">{row.id.toUpperCase()}</td>
-            </tr>
-          ))}
+          {rows.length === 0 ? (
+            <tr><td colSpan="7">No supply activities yet.</td></tr>
+          ) : (
+            rows.map((row) => (
+              <tr key={row.id}>
+                <td className="suppliers-muted">{formatDate(row.date)}</td>
+                <td className="suppliers-table__name">
+                  <strong>{row.supplierName || row.supplier}</strong>
+                </td>
+                <td className="suppliers-muted">{row.item}</td>
+                <td className="suppliers-muted">{row.quantity}</td>
+                <td className="suppliers-muted">{formatUnitPrice(row.pricePerUnit)}</td>
+                <td className="suppliers-total">{formatCurrency(row.totalAmount)}</td>
+                <td className="suppliers-muted">{(row.id || '').toString().slice(-6).toUpperCase()}</td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>

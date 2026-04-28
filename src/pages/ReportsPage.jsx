@@ -1,34 +1,51 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { sidebarItems } from '../data/dashboard';
-import {
-  inventoryDistribution,
-  purchaseTrend,
-  reportTabs,
-  salesBreakdown,
-  salesTrend,
-  stockSummary,
-  topClients,
-} from '../data/reports';
+import { reportTabs } from '../data/reports';
+import { reportsApi, inventoryApi } from '../api';
 import { reportExportIconSrc } from '../utils/images';
 import '../styles/dashboard.css';
 import '../styles/reports.css';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('sales');
+  const [salesByMonth, setSalesByMonth] = useState([]);
+  const [topClients, setTopClients] = useState([]);
+  const [overview, setOverview] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([reportsApi.sales(), reportsApi.topClients(), inventoryApi.overview()])
+      .then(([salesData, topData, overviewData]) => {
+        if (cancelled) return;
+        setSalesByMonth(salesData);
+        setTopClients(topData);
+        setOverview(overviewData);
+      })
+      .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load reports'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const tabContent = useMemo(() => {
+    if (loading) return <p>Loading…</p>;
+    if (loadError) return <p className="auth-error">{loadError}</p>;
     if (activeTab === 'purchase') {
-      return <PurchaseReport />;
+      return <PurchaseReport sales={salesByMonth} />;
     }
-
     if (activeTab === 'inventory') {
-      return <InventoryReport />;
+      return <InventoryReport overview={overview} />;
     }
-
-    return <SalesReport />;
-  }, [activeTab]);
+    return <SalesReport sales={salesByMonth} topClients={topClients} />;
+  }, [activeTab, loading, loadError, salesByMonth, topClients, overview]);
 
   return (
     <main className="dashboard-shell">
@@ -72,30 +89,51 @@ export default function ReportsPage() {
   );
 }
 
-function SalesReport() {
+function buildMonthlyView(sales) {
+  const labels = sales.map((row) => `${MONTHS[row.id.month - 1]} '${String(row.id.year).slice(-2)}`);
+  const values = sales.map((row) => Number(row.total) || 0);
+  const counts = sales.map((row) => Number(row.count) || 0);
+  return { labels, values, counts };
+}
+
+function SalesReport({ sales, topClients }) {
+  const { labels, values, counts } = buildMonthlyView(sales);
+  const breakdown = sales.map((row, idx) => ({
+    month: labels[idx],
+    invoices: counts[idx],
+    totalSales: values[idx],
+    avgValue: counts[idx] > 0 ? values[idx] / counts[idx] : 0,
+  }));
+
   return (
     <>
       <section className="reports-grid reports-grid--two">
         <article className="report-card">
           <h2>Sales Trend</h2>
-          <LineChart values={salesTrend.values} labels={salesTrend.labels} stroke="#2267b2" />
+          {values.length === 0 ? <p>No sales data yet.</p> : (
+            <LineChart values={values} labels={labels} stroke="#2267b2" />
+          )}
         </article>
 
         <article className="report-card">
           <h2>Top Clients</h2>
           <div className="top-clients">
-            {topClients.map((client) => (
-              <div key={client.rank} className="top-client-row">
-                <div className="top-client-row__left">
-                  <div className="top-client-row__rank">{client.rank}</div>
-                  <div className="top-client-row__meta">
-                    <strong>{client.name}</strong>
-                    <span>{client.invoices}</span>
+            {topClients.length === 0 ? (
+              <p>No client revenue yet.</p>
+            ) : (
+              topClients.map((client, index) => (
+                <div key={client.id || client.clientName} className="top-client-row">
+                  <div className="top-client-row__left">
+                    <div className="top-client-row__rank">{index + 1}</div>
+                    <div className="top-client-row__meta">
+                      <strong>{client.clientName}</strong>
+                      <span>{client.invoices} invoice(s)</span>
+                    </div>
                   </div>
+                  <strong className="top-client-row__amount">{formatTwoDecimals(client.total)}</strong>
                 </div>
-                <strong className="top-client-row__amount">{formatTwoDecimals(client.amount)}</strong>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </article>
       </section>
@@ -113,14 +151,18 @@ function SalesReport() {
               </tr>
             </thead>
             <tbody>
-              {salesBreakdown.map((row) => (
-                <tr key={row.month}>
-                  <td>{row.month}</td>
-                  <td>{row.invoices}</td>
-                  <td>{formatThousands(row.totalSales)}</td>
-                  <td>{formatTwoDecimals(row.avgValue)}</td>
-                </tr>
-              ))}
+              {breakdown.length === 0 ? (
+                <tr><td colSpan="4">No data.</td></tr>
+              ) : (
+                breakdown.map((row) => (
+                  <tr key={row.month}>
+                    <td>{row.month}</td>
+                    <td>{row.invoices}</td>
+                    <td>{formatThousands(row.totalSales)}</td>
+                    <td>{formatTwoDecimals(row.avgValue)}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -129,21 +171,37 @@ function SalesReport() {
   );
 }
 
-function PurchaseReport() {
+function PurchaseReport({ sales }) {
+  const { labels, values } = buildMonthlyView(sales);
   return (
     <section className="report-card report-card--full">
       <h2>Purchase Trend</h2>
-      <BarChart values={purchaseTrend.values} labels={purchaseTrend.labels} fill="#22c55e" />
+      {values.length === 0 ? <p>No purchase data yet.</p> : (
+        <BarChart values={values} labels={labels} fill="#22c55e" />
+      )}
     </section>
   );
 }
 
-function InventoryReport() {
+function InventoryReport({ overview }) {
+  const palette = { 'In Stock': '#22c55e', 'Low Stock': '#eab308', 'Out of Stock': '#ef4444' };
+  const segments = overview.map((row) => ({
+    label: row.label,
+    value: row.value,
+    color: palette[row.label] || '#94a3b8',
+  }));
+  const stockSummary = overview.map((row) => ({
+    label: row.label,
+    value: row.value,
+    tone: row.id === 'in-stock' ? 'success' : row.id === 'low-stock' ? 'warning' : 'danger',
+  }));
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+
   return (
     <section className="reports-grid reports-grid--two">
       <article className="report-card">
         <h2>Inventory Distribution</h2>
-        <PieChart segments={inventoryDistribution} />
+        {total === 0 ? <p>No inventory yet.</p> : <PieChart segments={segments} />}
       </article>
 
       <article className="report-card">
@@ -223,7 +281,7 @@ function BarChart({ values, labels, fill }) {
                 className="chart-axis__label"
                 textAnchor="end"
               >
-                {tick}
+                {Math.round(tick)}
               </text>
             </g>
           );
@@ -269,7 +327,7 @@ function PieChart({ segments }) {
   const cy = 150;
   const radius = 95;
   const labelRadius = 130;
-  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0) || 1;
   let accumulated = 0;
 
   const renderedSegments = segments.map((segment) => {
@@ -338,6 +396,7 @@ function renderGridLines(width, height) {
 }
 
 function createPoints(values, width, height, padding) {
+  if (values.length === 0) return [];
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
@@ -383,7 +442,7 @@ function formatThousands(value) {
     currency: 'USD',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(value || 0);
 }
 
 function formatTwoDecimals(value) {
@@ -393,7 +452,7 @@ function formatTwoDecimals(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
     useGrouping: false,
-  }).format(value);
+  }).format(value || 0);
 }
 
 function niceMax(value) {

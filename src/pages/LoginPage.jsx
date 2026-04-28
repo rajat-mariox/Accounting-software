@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import BrandLockup from '../components/BrandLockup';
 import AuthField from '../components/AuthField';
-import { userRoles } from '../data/settings';
-import { DEFAULT_PASSWORD, setStoredUser } from '../utils/auth';
+import { authApi } from '../api';
+import { setStoredAuth } from '../utils/auth';
 import { loginLockIconSrc, loginMailIconSrc } from '../utils/images';
 import { isNonEmpty, isValidEmail } from '../utils/validators';
 import '../styles/auth.css';
@@ -11,14 +11,14 @@ import '../styles/auth.css';
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const users = useMemo(() => userRoles, []);
-  const [email, setEmail] = useState(users[0]?.email ?? '');
+  const [email, setEmail] = useState('admin@accountech.com');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const redirectTo = location.state?.from ?? '/dashboard';
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setError('');
 
@@ -35,20 +35,16 @@ export default function LoginPage() {
       return;
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = users.find((entry) => entry.email.toLowerCase() === normalizedEmail);
-    if (!user) {
-      setError('Unknown user email.');
-      return;
+    setSubmitting(true);
+    try {
+      const { user, token } = await authApi.login(email.trim().toLowerCase(), password);
+      setStoredAuth({ user, token });
+      navigate(redirectTo, { replace: true });
+    } catch (err) {
+      setError(err.message || 'Sign-in failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
-
-    if (password !== DEFAULT_PASSWORD) {
-      setError('Incorrect password.');
-      return;
-    }
-
-    setStoredUser(user);
-    navigate(redirectTo, { replace: true });
   }
 
   return (
@@ -85,8 +81,8 @@ export default function LoginPage() {
 
           {error ? <p className="auth-error">{error}</p> : null}
 
-          <button className="primary-button" type="submit">
-            Log In
+          <button className="primary-button" type="submit" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Log In'}
           </button>
 
           <p className="signup-copy">
