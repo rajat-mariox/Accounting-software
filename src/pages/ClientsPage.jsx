@@ -15,7 +15,7 @@ import {
   UserOutlineIcon,
 } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
-import { clientRows } from '../data/clients';
+import { clientsApi } from '../api';
 import { formatCurrency } from '../utils/formatters';
 import { isNonEmpty, isValidEmail, isValidPhone, sanitizePhoneInput } from '../utils/validators';
 import useDebouncedValue from '../utils/useDebouncedValue';
@@ -55,33 +55,55 @@ function validateClientForm(form) {
   return errors;
 }
 
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
+
 export default function ClientsPage({ initialAction }) {
-  const [clients, setClients] = useState(clientRows);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
   const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'add' : null);
-  const [selectedClient, setSelectedClient] = useState(clients[0]);
+  const [selectedClient, setSelectedClient] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!toast) {
-      return undefined;
-    }
+    let cancelled = false;
+    setLoading(true);
+    clientsApi
+      .list()
+      .then((rows) => {
+        if (cancelled) return;
+        setClients(rows);
+        setSelectedClient((current) => current ?? rows[0] ?? null);
+      })
+      .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load clients'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  useEffect(() => {
+    if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(null), 2800);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
   const filteredClients = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase();
-    if (!query) {
-      return clients;
-    }
-
+    if (!query) return clients;
     return clients.filter((client) =>
       [client.name, client.company, client.email, client.phone, client.address]
+        .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(query),
@@ -94,19 +116,25 @@ export default function ClientsPage({ initialAction }) {
     setModalMode('add');
   }
 
-  function openDetailsModal(client) {
+  async function openDetailsModal(client) {
     setSelectedClient(client);
     setModalMode('details');
+    try {
+      const full = await clientsApi.get(client.id);
+      setSelectedClient(full);
+    } catch {
+      // keep the row data already shown
+    }
   }
 
   function openEditModal(client) {
     setSelectedClient(client);
     setForm({
-      name: client.name,
-      email: client.email,
-      phone: sanitizePhoneInput(client.phone),
-      company: client.company,
-      address: client.address,
+      name: client.name || '',
+      email: client.email || '',
+      phone: sanitizePhoneInput(client.phone || ''),
+      company: client.company || '',
+      address: client.address || '',
     });
     setErrors({});
     setModalMode('edit');
@@ -138,67 +166,66 @@ export default function ClientsPage({ initialAction }) {
     });
   }
 
-  function handleAddSubmit(event) {
+  async function handleAddSubmit(event) {
     event.preventDefault();
     const validationErrors = validateClientForm(form);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
-    const nextClient = createClientFromForm(form);
-
-    setClients((current) => [nextClient, ...current]);
-    setSelectedClient(nextClient);
-    setModalMode(null);
-    setErrors({});
-    setForm(emptyForm);
-    showToast('Client added successfully');
+    setSubmitting(true);
+    try {
+      const created = await clientsApi.create(form);
+      setClients((current) => [created, ...current]);
+      setSelectedClient(created);
+      setModalMode(null);
+      setForm(emptyForm);
+      showToast('Client added successfully');
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not add client' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleEditSubmit(event) {
+  async function handleEditSubmit(event) {
     event.preventDefault();
     const validationErrors = validateClientForm(form);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
-
-    setClients((current) =>
-      current.map((client) =>
-        client.id === selectedClient.id
-          ? {
-              ...client,
-              name: form.name,
-              email: form.email,
-              phone: form.phone,
-              company: form.company,
-              address: form.address,
-            }
-          : client,
-      ),
-    );
-
-    setSelectedClient((current) => ({
-      ...current,
-      name: form.name,
-      email: form.email,
-      phone: form.phone,
-      company: form.company,
-      address: form.address,
-    }));
-    setModalMode(null);
-    setErrors({});
-    showToast('Client updated successfully');
+    setSubmitting(true);
+    try {
+      const updated = await clientsApi.update(selectedClient.id, form);
+      setClients((current) => current.map((c) => (c.id === updated.id ? updated : c)));
+      setSelectedClient(updated);
+      setModalMode(null);
+      showToast('Client updated successfully');
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not update client' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleDeleteConfirm() {
-    setClients((current) => {
-      const next = current.filter((client) => client.id !== selectedClient.id);
-      setSelectedClient(next[0] ?? null);
-      return next;
-    });
-    setModalMode(null);
-    showToast('Client deleted successfully');
+  async function handleDeleteConfirm() {
+    if (!selectedClient) return;
+    setSubmitting(true);
+    try {
+      await clientsApi.remove(selectedClient.id);
+      setClients((current) => {
+        const next = current.filter((c) => c.id !== selectedClient.id);
+        setSelectedClient(next[0] ?? null);
+        return next;
+      });
+      setModalMode(null);
+      showToast('Client deleted successfully');
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not delete client' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const activeClient = selectedClient ?? filteredClients[0] ?? clients[0];
@@ -250,6 +277,8 @@ export default function ClientsPage({ initialAction }) {
               />
             </label>
 
+            {loadError ? <p className="auth-error">{loadError}</p> : null}
+
             <div className="clients-table-wrap">
               <table className="clients-table">
                 <thead>
@@ -263,50 +292,56 @@ export default function ClientsPage({ initialAction }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredClients.map((row) => (
-                    <tr key={row.id}>
-                      <td className="clients-table__name">
-                        <button className="client-name-button" type="button" onClick={() => openDetailsModal(row)}>
-                          <strong>{row.name}</strong>
-                          <span>{row.address}</span>
-                        </button>
-                      </td>
-                      <td>{row.company}</td>
-                      <td>
-                        <span className="inline-meta">
-                          <MailOutlineIcon />
-                          {row.email}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="inline-meta">
-                          <PhoneOutlineIcon />
-                          {row.phone}
-                        </span>
-                      </td>
-                      <td>{row.created}</td>
-                      <td>
-                        <div className="clients-actions">
-                          <button
-                            type="button"
-                            className="icon-action icon-action--edit"
-                            aria-label={`View ${row.name}`}
-                            onClick={() => openDetailsModal(row)}
-                          >
-                            <EditIcon />
+                  {loading && clients.length === 0 ? (
+                    <tr><td colSpan="6">Loading…</td></tr>
+                  ) : filteredClients.length === 0 ? (
+                    <tr><td colSpan="6">No clients yet.</td></tr>
+                  ) : (
+                    filteredClients.map((row) => (
+                      <tr key={row.id}>
+                        <td className="clients-table__name">
+                          <button className="client-name-button" type="button" onClick={() => openDetailsModal(row)}>
+                            <strong>{row.name}</strong>
+                            <span>{row.address}</span>
                           </button>
-                          <button
-                            type="button"
-                            className="icon-action icon-action--delete"
-                            aria-label={`Delete ${row.name}`}
-                            onClick={() => openDeleteModal(row)}
-                          >
-                            <TrashIcon />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>{row.company}</td>
+                        <td>
+                          <span className="inline-meta">
+                            <MailOutlineIcon />
+                            {row.email}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="inline-meta">
+                            <PhoneOutlineIcon />
+                            {row.phone}
+                          </span>
+                        </td>
+                        <td>{formatDate(row.created || row.createdAt)}</td>
+                        <td>
+                          <div className="clients-actions">
+                            <button
+                              type="button"
+                              className="icon-action icon-action--edit"
+                              aria-label={`View ${row.name}`}
+                              onClick={() => openDetailsModal(row)}
+                            >
+                              <EditIcon />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-action icon-action--delete"
+                              aria-label={`Delete ${row.name}`}
+                              onClick={() => openDeleteModal(row)}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -320,6 +355,7 @@ export default function ClientsPage({ initialAction }) {
                 onChange={handleFieldChange}
                 onCancel={closeModal}
                 onSubmit={handleAddSubmit}
+                submitting={submitting}
               />
             </ClientModal>
           ) : null}
@@ -333,11 +369,12 @@ export default function ClientsPage({ initialAction }) {
                 onCancel={closeModal}
                 onSubmit={handleEditSubmit}
                 submitLabel="Update Client"
+                submitting={submitting}
               />
             </ClientModal>
           ) : null}
 
-          {modalMode === 'details' ? (
+          {modalMode === 'details' && activeClient ? (
             <ClientModal
               onBackdrop={closeModal}
               title="Client Details"
@@ -353,12 +390,13 @@ export default function ClientsPage({ initialAction }) {
             </ClientModal>
           ) : null}
 
-          {modalMode === 'delete' ? (
+          {modalMode === 'delete' && activeClient ? (
             <ClientModal onBackdrop={closeModal} title="Delete Client" widthClass="client-modal--delete">
               <DeleteClientDialog
                 client={activeClient}
                 onCancel={closeModal}
                 onDelete={handleDeleteConfirm}
+                submitting={submitting}
               />
             </ClientModal>
           ) : null}
@@ -366,21 +404,6 @@ export default function ClientsPage({ initialAction }) {
       </section>
     </main>
   );
-}
-
-function createClientFromForm(form) {
-  const slug = `${form.name || 'new-client'}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-
-  return {
-    id: slug,
-    name: form.name || 'New Client',
-    address: form.address || 'New Address',
-    company: form.company || 'New Company',
-    email: form.email || 'client@example.com',
-    phone: form.phone || '+1-555-0000',
-    created: new Date().toISOString().slice(0, 10),
-    invoiceHistory: [],
-  };
 }
 
 function ClientModal({ title, children, onBackdrop, widthClass = '', headerAction = null }) {
@@ -408,7 +431,7 @@ function ClientModal({ title, children, onBackdrop, widthClass = '', headerActio
   );
 }
 
-function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLabel = 'Add Client' }) {
+function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLabel = 'Add Client', submitting = false }) {
   return (
     <form className="client-form" onSubmit={onSubmit} noValidate>
       <label className="client-field">
@@ -484,12 +507,14 @@ function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLab
         {errors.address ? <span className="field-error">{errors.address}</span> : null}
       </label>
 
+      {errors.form ? <span className="field-error">{errors.form}</span> : null}
+
       <div className="client-form__actions">
-        <button type="button" className="modal-text-button" onClick={onCancel}>
+        <button type="button" className="modal-text-button" onClick={onCancel} disabled={submitting}>
           Cancel
         </button>
-        <button type="submit" className="modal-primary-button">
-          {submitLabel}
+        <button type="submit" className="modal-primary-button" disabled={submitting}>
+          {submitting ? 'Saving…' : submitLabel}
         </button>
       </div>
     </form>
@@ -514,8 +539,8 @@ function ClientDetails({ client }) {
         {invoice ? (
           <div className="invoice-history-item">
             <div>
-              <strong>{invoice.id}</strong>
-              <span>{invoice.date}</span>
+              <strong>{invoice.invoiceNumber || invoice.id}</strong>
+              <span>{formatDate(invoice.createdDate || invoice.date)}</span>
             </div>
             <div className="invoice-history-item__meta">
               <strong>{formatCurrency(invoice.amount)}</strong>
@@ -542,7 +567,7 @@ function DetailBlock({ icon: Icon, label, value, fullWidth = false }) {
   );
 }
 
-function DeleteClientDialog({ client, onCancel, onDelete }) {
+function DeleteClientDialog({ client, onCancel, onDelete, submitting }) {
   return (
     <div className="delete-dialog">
       <div className="delete-dialog__message">
@@ -554,11 +579,11 @@ function DeleteClientDialog({ client, onCancel, onDelete }) {
         </p>
       </div>
       <div className="client-form__actions">
-        <button type="button" className="modal-text-button" onClick={onCancel}>
+        <button type="button" className="modal-text-button" onClick={onCancel} disabled={submitting}>
           Cancel
         </button>
-        <button type="button" className="modal-delete-button" onClick={onDelete}>
-          Delete
+        <button type="button" className="modal-delete-button" onClick={onDelete} disabled={submitting}>
+          {submitting ? 'Deleting…' : 'Delete'}
         </button>
       </div>
     </div>

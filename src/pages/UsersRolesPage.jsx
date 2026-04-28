@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import {
@@ -9,7 +9,7 @@ import {
   ViewIcon,
 } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
-import { userRoleCount, userRows } from '../data/users';
+import { usersApi } from '../api';
 import {
   isNonEmpty,
   isStrongEnoughPassword,
@@ -66,7 +66,7 @@ function validateUserForm(form, mode, existingUsers, currentUserId) {
   } else {
     const trimmed = form.email.trim().toLowerCase();
     const taken = existingUsers.some(
-      (user) => user.email.toLowerCase() === trimmed && user.id !== currentUserId,
+      (user) => (user.email || '').toLowerCase() === trimmed && user.id !== currentUserId,
     );
     if (taken) errors.email = 'A user with this email already exists.';
   }
@@ -90,7 +90,7 @@ function validateUserForm(form, mode, existingUsers, currentUserId) {
 }
 
 function buildInitials(name) {
-  return name
+  return (name || '')
     .split(' ')
     .map((part) => part[0])
     .filter(Boolean)
@@ -104,13 +104,36 @@ function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function formatLogin(value) {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
+
 export default function UsersRolesPage() {
-  const [users, setUsers] = useState(userRows);
-  const [modalMode, setModalMode] = useState(null); // 'add' | 'edit' | 'delete' | null
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [modalMode, setModalMode] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    usersApi
+      .list()
+      .then((rows) => !cancelled && setUsers(rows))
+      .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load users'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const stats = useMemo(() => {
     const activeCount = users.filter((user) => user.status === 'active').length;
@@ -119,7 +142,7 @@ export default function UsersRolesPage() {
       { label: 'Total Users', value: users.length, tone: 'blue', iconSrc: usersTotalIconSrc },
       { label: 'Active Users', value: activeCount, tone: 'green', iconSrc: usersActiveIconSrc },
       { label: 'Inactive Users', value: inactiveCount, tone: 'red', iconSrc: usersInactiveIconSrc },
-      { label: 'Roles', value: userRoleCount, tone: 'amber', iconSrc: usersRolesShieldIconSrc },
+      { label: 'Roles', value: roleOptions.length, tone: 'amber', iconSrc: usersRolesShieldIconSrc },
     ];
   }, [users]);
 
@@ -134,12 +157,12 @@ export default function UsersRolesPage() {
   function openEditModal(user) {
     setSelectedUser(user);
     setForm({
-      name: user.name,
-      email: user.email,
+      name: user.name || '',
+      email: user.email || '',
       password: '',
-      phone: sanitizePhoneInput(user.phone),
-      role: user.role,
-      status: capitalize(user.status),
+      phone: sanitizePhoneInput(user.phone || ''),
+      role: user.role || '',
+      status: capitalize(user.status || ''),
     });
     setErrors({});
     setShowPassword(false);
@@ -169,57 +192,51 @@ export default function UsersRolesPage() {
     });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     const validationErrors = validateUserForm(form, modalMode, users, selectedUser?.id);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
+    setSubmitting(true);
+    try {
+      const payload = {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        role: form.role,
+        status: form.status.toLowerCase(),
+      };
+      if (form.password) payload.password = form.password;
 
-    const roleMatch = roleOptions.find((option) => option.value === form.role);
-
-    if (modalMode === 'edit' && selectedUser) {
-      setUsers((current) =>
-        current.map((user) =>
-          user.id === selectedUser.id
-            ? {
-                ...user,
-                name: form.name,
-                initials: buildInitials(form.name),
-                email: form.email,
-                phone: form.phone || user.phone,
-                role: form.role,
-                roleTone: roleMatch?.tone ?? user.roleTone,
-                status: form.status.toLowerCase(),
-              }
-            : user,
-        ),
-      );
+      if (modalMode === 'edit' && selectedUser) {
+        const updated = await usersApi.update(selectedUser.id, payload);
+        setUsers((current) => current.map((u) => (u.id === selectedUser.id ? updated : u)));
+      } else {
+        const created = await usersApi.create(payload);
+        setUsers((current) => [...current, created]);
+      }
       closeModal();
-      return;
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not save user' });
+    } finally {
+      setSubmitting(false);
     }
-
-    const newUser = {
-      id: `u${users.length + 1}`,
-      initials: buildInitials(form.name),
-      name: form.name,
-      email: form.email,
-      phone: form.phone || '+1-555-0000',
-      role: form.role,
-      roleTone: roleMatch?.tone ?? 'manager',
-      status: form.status.toLowerCase(),
-      lastLogin: 'Never',
-    };
-
-    setUsers((current) => [...current, newUser]);
-    closeModal();
   }
 
-  function handleDeleteConfirm() {
+  async function handleDeleteConfirm() {
     if (!selectedUser) return;
-    setUsers((current) => current.filter((user) => user.id !== selectedUser.id));
-    closeModal();
+    setSubmitting(true);
+    try {
+      await usersApi.remove(selectedUser.id);
+      setUsers((current) => current.filter((user) => user.id !== selectedUser.id));
+      closeModal();
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not delete user' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -259,6 +276,8 @@ export default function UsersRolesPage() {
           <section className="users-list-card">
             <h2 className="users-list-card__title">All Users</h2>
 
+            {loadError ? <p className="auth-error">{loadError}</p> : null}
+
             <div className="users-table-wrap">
               <table className="users-table">
                 <thead>
@@ -273,61 +292,67 @@ export default function UsersRolesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
-                    <tr key={user.id}>
-                      <td className="users-table__name-cell">
-                        <span className="users-avatar">{user.initials}</span>
-                        <div className="users-table__name">
-                          <strong>{user.name}</strong>
-                          <p>ID: {user.id}</p>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="users-table__inline">
-                          <img src={usersMailIconSrc} alt="" aria-hidden="true" />
-                          {user.email}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="users-table__inline">
-                          <img src={usersPhoneIconSrc} alt="" aria-hidden="true" />
-                          {user.phone}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`users-pill users-pill--${user.roleTone}`}>{user.role}</span>
-                      </td>
-                      <td>
-                        <span className={`users-pill users-pill--status-${user.status}`}>{user.status}</span>
-                      </td>
-                      <td>
-                        <span className="users-table__inline">
-                          <img src={usersCalendarIconSrc} alt="" aria-hidden="true" />
-                          {user.lastLogin}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="users-actions">
-                          <button
-                            type="button"
-                            className="users-action-btn users-action-btn--edit"
-                            aria-label={`Edit ${user.name}`}
-                            onClick={() => openEditModal(user)}
-                          >
-                            <EditIcon />
-                          </button>
-                          <button
-                            type="button"
-                            className="users-action-btn users-action-btn--delete"
-                            aria-label={`Delete ${user.name}`}
-                            onClick={() => openDeleteModal(user)}
-                          >
-                            <TrashIcon />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {loading && users.length === 0 ? (
+                    <tr><td colSpan="7">Loading…</td></tr>
+                  ) : users.length === 0 ? (
+                    <tr><td colSpan="7">No users yet.</td></tr>
+                  ) : (
+                    users.map((user) => (
+                      <tr key={user.id}>
+                        <td className="users-table__name-cell">
+                          <span className="users-avatar">{user.initials || buildInitials(user.name)}</span>
+                          <div className="users-table__name">
+                            <strong>{user.name}</strong>
+                            <p>ID: {user.id}</p>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="users-table__inline">
+                            <img src={usersMailIconSrc} alt="" aria-hidden="true" />
+                            {user.email}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="users-table__inline">
+                            <img src={usersPhoneIconSrc} alt="" aria-hidden="true" />
+                            {user.phone}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`users-pill users-pill--${user.roleTone || 'manager'}`}>{user.role}</span>
+                        </td>
+                        <td>
+                          <span className={`users-pill users-pill--status-${user.status}`}>{user.status}</span>
+                        </td>
+                        <td>
+                          <span className="users-table__inline">
+                            <img src={usersCalendarIconSrc} alt="" aria-hidden="true" />
+                            {formatLogin(user.lastLogin)}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="users-actions">
+                            <button
+                              type="button"
+                              className="users-action-btn users-action-btn--edit"
+                              aria-label={`Edit ${user.name}`}
+                              onClick={() => openEditModal(user)}
+                            >
+                              <EditIcon />
+                            </button>
+                            <button
+                              type="button"
+                              className="users-action-btn users-action-btn--delete"
+                              aria-label={`Delete ${user.name}`}
+                              onClick={() => openDeleteModal(user)}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -509,12 +534,14 @@ export default function UsersRolesPage() {
                     </ul>
                   </div>
 
+                  {errors.form ? <span className="field-error">{errors.form}</span> : null}
+
                   <div className="users-modal__actions">
-                    <button type="button" className="users-modal__cancel" onClick={closeModal}>
+                    <button type="button" className="users-modal__cancel" onClick={closeModal} disabled={submitting}>
                       Cancel
                     </button>
-                    <button type="submit" className="users-modal__submit">
-                      {modalMode === 'edit' ? 'Update User' : 'Add User'}
+                    <button type="submit" className="users-modal__submit" disabled={submitting}>
+                      {submitting ? 'Saving…' : modalMode === 'edit' ? 'Update User' : 'Add User'}
                     </button>
                   </div>
                 </form>
@@ -548,12 +575,14 @@ export default function UsersRolesPage() {
                     Are you sure you want to delete <strong>{selectedUser.name}</strong>? This action cannot be undone.
                   </p>
 
+                  {errors.form ? <span className="field-error">{errors.form}</span> : null}
+
                   <div className="users-modal__actions">
-                    <button type="button" className="users-modal__cancel" onClick={closeModal}>
+                    <button type="button" className="users-modal__cancel" onClick={closeModal} disabled={submitting}>
                       Cancel
                     </button>
-                    <button type="button" className="users-modal__submit users-modal__submit--danger" onClick={handleDeleteConfirm}>
-                      Delete
+                    <button type="button" className="users-modal__submit users-modal__submit--danger" onClick={handleDeleteConfirm} disabled={submitting}>
+                      {submitting ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 </div>

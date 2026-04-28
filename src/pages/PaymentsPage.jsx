@@ -6,7 +6,8 @@ import {
   ChevronDownIcon,
 } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
-import { paymentInvoices, paymentModes, paymentRows } from '../data/payments';
+import { paymentModes } from '../data/payments';
+import { paymentsApi, invoicesApi } from '../api';
 import { formatCurrency } from '../utils/formatters';
 import { isNonEmpty, isPositiveNumber, isValidISODate } from '../utils/validators';
 import {
@@ -20,12 +21,23 @@ import '../styles/dashboard.css';
 import '../styles/payments.css';
 import '../styles/form-errors.css';
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
+
 const defaultForm = {
-  invoiceId: paymentInvoices[0]?.id ?? '',
+  invoiceId: '',
   amount: '',
   mode: paymentModes[0],
-  reference: 'TXN-001',
-  date: '',
+  reference: '',
+  date: todayISO(),
 };
 
 function validatePaymentForm(form) {
@@ -45,45 +57,57 @@ function validatePaymentForm(form) {
 }
 
 export default function PaymentsPage({ initialAction }) {
-  const [payments, setPayments] = useState(paymentRows);
+  const [payments, setPayments] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form, setForm] = useState(defaultForm);
   const [errors, setErrors] = useState({});
   const [selectedFileName, setSelectedFileName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (initialAction === 'add') {
-      setForm({
-        invoiceId: paymentInvoices.find((invoice) => invoice.status !== 'paid')?.id ?? paymentInvoices[0]?.id ?? '',
-        amount: '',
-        mode: paymentModes[0],
-        reference: 'TXN-001',
-        date: '',
-      });
-      setErrors({});
-      setSelectedFileName('');
-      setIsModalOpen(true);
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([paymentsApi.list(), invoicesApi.list()])
+      .then(([paymentRows, invoiceRows]) => {
+        if (cancelled) return;
+        setPayments(paymentRows);
+        setInvoices(invoiceRows);
+      })
+      .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load payments'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initialAction === 'add' && !loading && invoices.length > 0) {
+      openModal();
     }
-  }, [initialAction]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAction, loading]);
 
   const totals = useMemo(() => {
-    const received = payments.reduce((sum, payment) => sum + payment.amount, 0);
-    const pendingInvoices = paymentInvoices.filter((invoice) => invoice.status !== 'paid').length;
-
+    const received = payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+    const pendingInvoices = invoices.filter((invoice) => invoice.status !== 'paid').length;
     return {
       totalPayments: payments.length,
       totalReceived: received,
       pendingInvoices,
     };
-  }, [payments]);
+  }, [payments, invoices]);
 
   function openModal() {
+    const firstUnpaid = invoices.find((invoice) => invoice.status !== 'paid') ?? invoices[0];
     setForm({
-      invoiceId: paymentInvoices.find((invoice) => invoice.status !== 'paid')?.id ?? paymentInvoices[0]?.id ?? '',
-      amount: '',
+      invoiceId: firstUnpaid?.id ?? '',
+      amount: firstUnpaid?.amount ? String(firstUnpaid.amount) : '',
       mode: paymentModes[0],
-      reference: 'TXN-001',
-      date: '',
+      reference: `TXN-${String(payments.length + 1).padStart(3, '0')}`,
+      date: todayISO(),
     });
     setErrors({});
     setSelectedFileName('');
@@ -111,26 +135,37 @@ export default function PaymentsPage({ initialAction }) {
     setSelectedFileName(file ? file.name : '');
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     const validationErrors = validatePaymentForm(form);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
-    const invoice = paymentInvoices.find((entry) => entry.id === form.invoiceId) ?? paymentInvoices[0];
-
-    const payment = {
-      id: `pay-${String(payments.length + 1).padStart(3, '0')}`,
-      invoiceId: invoice?.id ?? form.invoiceId,
-      date: form.date,
-      amount: Number(form.amount),
-      mode: form.mode,
-      reference: form.reference,
-    };
-
-    setPayments((current) => [payment, ...current]);
-    closeModal();
+    setSubmitting(true);
+    try {
+      const payload = {
+        invoice: form.invoiceId,
+        amount: Number(form.amount),
+        mode: form.mode,
+        reference: form.reference,
+        date: form.date,
+      };
+      const created = await paymentsApi.create(payload);
+      setPayments((current) => [created, ...current]);
+      // backend marks invoice as paid when fully covered — refresh list
+      try {
+        const refreshed = await invoicesApi.list();
+        setInvoices(refreshed);
+      } catch {
+        // ignore
+      }
+      closeModal();
+    } catch (err) {
+      setErrors({ form: err.message || 'Could not record payment' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -167,6 +202,8 @@ export default function PaymentsPage({ initialAction }) {
           <section className="payments-card">
             <h2 className="payments-card__title">Payment History</h2>
 
+            {loadError ? <p className="auth-error">{loadError}</p> : null}
+
             <div className="table-wrap">
               <table className="payments-table">
                 <thead>
@@ -179,17 +216,23 @@ export default function PaymentsPage({ initialAction }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((payment) => (
-                    <tr key={payment.id}>
-                      <td className="payments-invoice-id">{payment.invoiceId}</td>
-                      <td>{payment.date}</td>
-                      <td className="payments-amount">{formatCurrency(payment.amount)}</td>
-                      <td>
-                        <span className="payments-pill">{payment.mode}</span>
-                      </td>
-                      <td>{payment.reference}</td>
-                    </tr>
-                  ))}
+                  {loading && payments.length === 0 ? (
+                    <tr><td colSpan="5">Loading…</td></tr>
+                  ) : payments.length === 0 ? (
+                    <tr><td colSpan="5">No payments recorded yet.</td></tr>
+                  ) : (
+                    payments.map((payment) => (
+                      <tr key={payment.id}>
+                        <td className="payments-invoice-id">{payment.invoiceNumber || payment.invoice}</td>
+                        <td>{formatDate(payment.date)}</td>
+                        <td className="payments-amount">{formatCurrency(payment.amount)}</td>
+                        <td>
+                          <span className="payments-pill">{payment.mode}</span>
+                        </td>
+                        <td>{payment.reference}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -220,9 +263,9 @@ export default function PaymentsPage({ initialAction }) {
                       className={errors.invoiceId ? 'field-input--invalid' : ''}
                     >
                       <option value="" disabled></option>
-                      {paymentInvoices.map((invoice) => (
+                      {invoices.map((invoice) => (
                         <option key={invoice.id} value={invoice.id}>
-                          {invoice.id} - {invoice.client}
+                          {(invoice.invoiceNumber || invoice.id)} - {invoice.clientName}
                         </option>
                       ))}
                     </select>
@@ -304,14 +347,16 @@ export default function PaymentsPage({ initialAction }) {
                   </div>
                   <p>Upload check, deposit slip, or payment receipt (PDF or Image)</p>
                 </label>
+
+                {errors.form ? <span className="field-error">{errors.form}</span> : null}
               </div>
 
               <div className="payments-modal__footer">
-                <button type="button" className="modal-text-button" onClick={closeModal}>
+                <button type="button" className="modal-text-button" onClick={closeModal} disabled={submitting}>
                   Cancel
                 </button>
-                <button type="submit" className="payments-modal__primary">
-                  Record Payment
+                <button type="submit" className="payments-modal__primary" disabled={submitting}>
+                  {submitting ? 'Saving…' : 'Record Payment'}
                 </button>
               </div>
             </form>

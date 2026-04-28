@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { CloseIcon, TrashIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
-import { invoiceCatalog, invoiceClients, invoiceRows } from '../data/invoices';
+import { invoicesApi, clientsApi, inventoryApi } from '../api';
 import {
   isDueAfterCreated,
   isNonEmpty,
@@ -22,7 +22,6 @@ import {
   invoiceModalChevronIconSrc,
   invoiceAddItemIconSrc,
   invoiceEmptyPlusIconSrc,
-  invoiceFloatingPlusIconSrc,
   invoiceDetailUserIconSrc,
   invoiceDetailCalendarIconSrc,
   invoiceDeleteTrashIconSrc,
@@ -31,13 +30,16 @@ import '../styles/dashboard.css';
 import '../styles/invoices.css';
 import '../styles/form-errors.css';
 
-const createDefaults = {
-  clientId: invoiceClients[1]?.id ?? '',
-  createdDate: '2026-04-16',
-  dueDate: '2026-04-30',
-  itemId: invoiceCatalog[0]?.id ?? '',
-  quantity: '1',
-};
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+}
 
 function validateInvoiceForm(form, draftItems) {
   const errors = {};
@@ -57,26 +59,46 @@ function validateInvoiceForm(form, draftItems) {
 }
 
 export default function InvoicesPage({ initialAction }) {
-  const [invoices, setInvoices] = useState(invoiceRows);
+  const [invoices, setInvoices] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
   const [isModalOpen, setIsModalOpen] = useState(initialAction === 'add');
   const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'create' : null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [createForm, setCreateForm] = useState(createDefaults);
+  const [createForm, setCreateForm] = useState({ clientId: '', createdDate: todayISO(), dueDate: '', itemId: '', quantity: '1' });
   const [draftItems, setDraftItems] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [createErrors, setCreateErrors] = useState({});
   const [addItemError, setAddItemError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([invoicesApi.list(), clientsApi.list(), inventoryApi.list()])
+      .then(([invoiceRows, clientRows, itemRows]) => {
+        if (cancelled) return;
+        setInvoices(invoiceRows);
+        setClients(clientRows);
+        setCatalog(itemRows);
+      })
+      .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load invoices'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredInvoices = useMemo(() => {
     const query = debouncedSearch.trim().toLowerCase();
-    if (!query) {
-      return invoices;
-    }
-
+    if (!query) return invoices;
     return invoices.filter((invoice) =>
-      [invoice.id, invoice.client, invoice.createdDate, invoice.dueDate, invoice.status]
+      [invoice.invoiceNumber, invoice.clientName, invoice.status]
+        .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(query),
@@ -97,13 +119,17 @@ export default function InvoicesPage({ initialAction }) {
     () => draftItems.reduce((sum, item) => sum + item.quantity * item.price, 0),
     [draftItems],
   );
-  const draftTax = draftSubtotal * 0.1;
-  const draftTotal = draftSubtotal + draftTax;
 
   function openCreateModal() {
     setModalMode('create');
     setSelectedInvoice(null);
-    setCreateForm(createDefaults);
+    setCreateForm({
+      clientId: clients[0]?.id ?? '',
+      createdDate: todayISO(),
+      dueDate: '',
+      itemId: catalog[0]?.id ?? '',
+      quantity: '1',
+    });
     setDraftItems([]);
     setCreateErrors({});
     setAddItemError('');
@@ -131,7 +157,7 @@ export default function InvoicesPage({ initialAction }) {
     setAddItemError('');
   }
 
-  function handleCreateInvoice() {
+  async function handleCreateInvoice() {
     const validationErrors = validateInvoiceForm(createForm, draftItems);
     if (Object.keys(validationErrors).length > 0) {
       setCreateErrors(validationErrors);
@@ -140,39 +166,44 @@ export default function InvoicesPage({ initialAction }) {
       }
       return;
     }
-
-    const client = invoiceClients.find((item) => item.id === createForm.clientId) ?? invoiceClients[0];
-    const subtotal = draftItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
-    const tax = subtotal * 0.1;
-    const total = subtotal + tax;
-    const id = `INV-${Date.now()}`;
-
-    const nextInvoice = {
-      id,
-      client: client?.name ?? 'New Client',
-      createdDate: createForm.createdDate,
-      dueDate: createForm.dueDate,
-      amount: total,
-      status: 'pending',
-      tone: 'pending',
-      items: draftItems.map((item) => ({
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price,
-      })),
-    };
-
-    setInvoices((current) => [nextInvoice, ...current]);
-    closeModal();
+    setSubmitting(true);
+    try {
+      const created = await invoicesApi.create({
+        client: createForm.clientId,
+        createdDate: createForm.createdDate,
+        dueDate: createForm.dueDate,
+        items: draftItems.map((item) => ({ name: item.name, quantity: item.quantity, price: item.price })),
+      });
+      setInvoices((current) => [created, ...current]);
+      closeModal();
+    } catch (err) {
+      setCreateErrors({ form: err.message || 'Could not create invoice' });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleDeleteInvoice() {
-    if (!deleteTarget) {
-      return;
+  async function handleDeleteInvoice() {
+    if (!deleteTarget) return;
+    setSubmitting(true);
+    try {
+      await invoicesApi.remove(deleteTarget.id);
+      setInvoices((current) => current.filter((invoice) => invoice.id !== deleteTarget.id));
+      closeModal();
+    } catch (err) {
+      setCreateErrors({ form: err.message || 'Could not delete invoice' });
+    } finally {
+      setSubmitting(false);
     }
+  }
 
-    setInvoices((current) => current.filter((invoice) => invoice.id !== deleteTarget.id));
-    closeModal();
+  async function markPaid(invoice) {
+    try {
+      const updated = await invoicesApi.setStatus(invoice.id, 'paid');
+      setInvoices((current) => current.map((i) => (i.id === invoice.id ? updated : i)));
+    } catch {
+      // swallow — UI already shows current state
+    }
   }
 
   function handleCreateFieldChange(event) {
@@ -187,17 +218,15 @@ export default function InvoicesPage({ initialAction }) {
   }
 
   function handleAddDraftItem() {
-    const item = invoiceCatalog.find((entry) => entry.id === createForm.itemId);
+    const item = catalog.find((entry) => entry.id === createForm.itemId);
     if (!item) {
       setAddItemError('Select an item from the catalog.');
       return;
     }
-
     if (!isPositiveInteger(createForm.quantity)) {
       setAddItemError('Quantity must be a whole number greater than 0.');
       return;
     }
-
     const quantity = Number(createForm.quantity);
     setDraftItems((current) => [
       ...current,
@@ -208,7 +237,6 @@ export default function InvoicesPage({ initialAction }) {
         price: item.price,
       },
     ]);
-
     setCreateForm((current) => ({ ...current, quantity: '1' }));
     setAddItemError('');
     setCreateErrors((current) => {
@@ -225,7 +253,7 @@ export default function InvoicesPage({ initialAction }) {
 
   const invoiceLabel =
     modalMode === 'view' && selectedInvoice
-      ? `Invoice ${selectedInvoice.id}`
+      ? `Invoice ${selectedInvoice.invoiceNumber || selectedInvoice.id}`
       : modalMode === 'delete'
         ? 'Delete Invoice'
         : 'Create New Invoice';
@@ -297,6 +325,8 @@ export default function InvoicesPage({ initialAction }) {
               />
             </label>
 
+            {loadError ? <p className="auth-error">{loadError}</p> : null}
+
             <div className="table-wrap">
               <table className="invoice-table">
                 <thead>
@@ -311,46 +341,48 @@ export default function InvoicesPage({ initialAction }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredInvoices.map((invoice) => (
-                    <tr key={invoice.id}>
-                      <td className="invoice-id">{invoice.id}</td>
-                      <td>{invoice.client}</td>
-                      <td>{invoice.createdDate}</td>
-                      <td>{invoice.dueDate}</td>
-                      <td className="invoice-amount">{formatInvoiceMoney(invoice.amount)}</td>
-                      <td>
-                        <span className={`invoice-pill invoice-pill--${invoice.tone}`}>{invoice.status}</span>
-                      </td>
-                      <td>
-                        <div className="invoice-actions">
-                          <button type="button" className="invoice-icon-action" aria-label={`Download ${invoice.id}`}>
-                            <img src={invoiceDownloadIconSrc} alt="" aria-hidden="true" />
-                          </button>
-                          <button type="button" className="invoice-view-button" onClick={() => openViewModal(invoice)}>
-                            View
-                          </button>
-                          <button type="button" className="invoice-delete-button" onClick={() => openDeleteModal(invoice)}>
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {loading && invoices.length === 0 ? (
+                    <tr><td colSpan="7">Loading…</td></tr>
+                  ) : filteredInvoices.length === 0 ? (
+                    <tr><td colSpan="7">No invoices yet.</td></tr>
+                  ) : (
+                    filteredInvoices.map((invoice) => (
+                      <tr key={invoice.id}>
+                        <td className="invoice-id">{invoice.invoiceNumber || invoice.id}</td>
+                        <td>{invoice.clientName}</td>
+                        <td>{formatDate(invoice.createdDate)}</td>
+                        <td>{formatDate(invoice.dueDate)}</td>
+                        <td className="invoice-amount">{formatInvoiceMoney(invoice.amount)}</td>
+                        <td>
+                          <span className={`invoice-pill invoice-pill--${invoice.status}`}>{invoice.status}</span>
+                        </td>
+                        <td>
+                          <div className="invoice-actions">
+                            {invoice.status !== 'paid' ? (
+                              <button type="button" className="invoice-view-button" onClick={() => markPaid(invoice)}>
+                                Mark Paid
+                              </button>
+                            ) : (
+                              <button type="button" className="invoice-icon-action" aria-label={`Download ${invoice.invoiceNumber || invoice.id}`}>
+                                <img src={invoiceDownloadIconSrc} alt="" aria-hidden="true" />
+                              </button>
+                            )}
+                            <button type="button" className="invoice-view-button" onClick={() => openViewModal(invoice)}>
+                              View
+                            </button>
+                            <button type="button" className="invoice-delete-button" onClick={() => openDeleteModal(invoice)}>
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           </section>
         </div>
-
-        <button type="button" className="invoice-floating-button" onClick={openCreateModal}>
-          <img
-            src={invoiceFloatingPlusIconSrc}
-            alt=""
-            aria-hidden="true"
-            className="invoice-floating-button__icon"
-          />
-          Create Invoice
-        </button>
       </section>
 
       {isModalOpen ? (
@@ -383,7 +415,7 @@ export default function InvoicesPage({ initialAction }) {
                         className={createErrors.clientId ? 'field-input--invalid' : ''}
                       >
                         <option value="" disabled></option>
-                        {invoiceClients.map((client) => (
+                        {clients.map((client) => (
                           <option key={client.id} value={client.id}>
                             {client.name}
                           </option>
@@ -440,7 +472,8 @@ export default function InvoicesPage({ initialAction }) {
                   <label className="invoice-field invoice-field--grow">
                     <div className="invoice-select">
                       <select value={createForm.itemId} name="itemId" onChange={handleCreateFieldChange}>
-                        {invoiceCatalog.map((item) => (
+                        <option value="" disabled></option>
+                        {catalog.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.name} _$ {item.price}(Stock:{item.stock})
                           </option>
@@ -509,17 +542,9 @@ export default function InvoicesPage({ initialAction }) {
                     </table>
 
                     <div className="invoice-totals">
-                      <div>
-                        <span>Subtotal:</span>
-                        <strong>{formatInvoiceMoney(draftSubtotal)}</strong>
-                      </div>
-                      <div>
-                        <span>Tax (10%):</span>
-                        <strong>{formatInvoiceMoney(draftTax)}</strong>
-                      </div>
                       <div className="invoice-totals__total">
                         <span>Total:</span>
-                        <strong>{formatInvoiceMoney(draftTotal)}</strong>
+                        <strong>{formatInvoiceMoney(draftSubtotal)}</strong>
                       </div>
                     </div>
                   </div>
@@ -530,17 +555,19 @@ export default function InvoicesPage({ initialAction }) {
                   </div>
                 )}
 
+                {createErrors.form ? <span className="field-error">{createErrors.form}</span> : null}
+
                 <div className="invoice-modal__footer">
-                  <button type="button" className="modal-text-button" onClick={closeModal}>
+                  <button type="button" className="modal-text-button" onClick={closeModal} disabled={submitting}>
                     Cancel
                   </button>
                   <button
                     type="button"
                     className="modal-primary-button invoice-modal__primary"
-                    disabled={!draftItems.length}
+                    disabled={!draftItems.length || submitting}
                     onClick={handleCreateInvoice}
                   >
-                    Create Invoice
+                    {submitting ? 'Saving…' : 'Create Invoice'}
                   </button>
                 </div>
               </div>
@@ -553,13 +580,13 @@ export default function InvoicesPage({ initialAction }) {
                     <span>Client</span>
                     <div className="invoice-detail__value">
                       <img src={invoiceDetailUserIconSrc} alt="" aria-hidden="true" />
-                      {selectedInvoice.client}
+                      {selectedInvoice.clientName}
                     </div>
                   </div>
                   <div className="invoice-detail__field">
                     <span>Status</span>
                     <div className="invoice-detail__value">
-                      <span className={`invoice-pill invoice-pill--${selectedInvoice.tone}`}>
+                      <span className={`invoice-pill invoice-pill--${selectedInvoice.status}`}>
                         {selectedInvoice.status}
                       </span>
                     </div>
@@ -568,14 +595,14 @@ export default function InvoicesPage({ initialAction }) {
                     <span>Created Date</span>
                     <div className="invoice-detail__value">
                       <img src={invoiceDetailCalendarIconSrc} alt="" aria-hidden="true" />
-                      {selectedInvoice.createdDate}
+                      {formatDate(selectedInvoice.createdDate)}
                     </div>
                   </div>
                   <div className="invoice-detail__field">
                     <span>Due Date</span>
                     <div className="invoice-detail__value">
                       <img src={invoiceDetailCalendarIconSrc} alt="" aria-hidden="true" />
-                      {selectedInvoice.dueDate}
+                      {formatDate(selectedInvoice.dueDate)}
                     </div>
                   </div>
                 </div>
@@ -583,8 +610,8 @@ export default function InvoicesPage({ initialAction }) {
                 <div className="invoice-detail__items-section">
                   <h3 className="invoice-detail__items-title">Items</h3>
                   <div className="invoice-detail__items">
-                    {selectedInvoice.items.map((item) => (
-                      <div key={`${selectedInvoice.id}-${item.name}`} className="invoice-detail__item">
+                    {(selectedInvoice.items || []).map((item, idx) => (
+                      <div key={`${selectedInvoice.id}-${item.name}-${idx}`} className="invoice-detail__item">
                         <div className="invoice-detail__item-info">
                           <strong>{item.name}</strong>
                           <span>
@@ -598,14 +625,6 @@ export default function InvoicesPage({ initialAction }) {
                 </div>
 
                 <div className="invoice-detail__totals">
-                  <div>
-                    <span>Subtotal:</span>
-                    <strong>{formatInvoiceMoney(selectedInvoice.amount / 1.1)}</strong>
-                  </div>
-                  <div>
-                    <span>Tax:</span>
-                    <strong>{formatInvoiceMoney(selectedInvoice.amount - selectedInvoice.amount / 1.1)}</strong>
-                  </div>
                   <div className="invoice-detail__total">
                     <span>Total:</span>
                     <strong>{formatInvoiceMoney(selectedInvoice.amount)}</strong>
@@ -621,15 +640,15 @@ export default function InvoicesPage({ initialAction }) {
                     <img src={invoiceDeleteTrashIconSrc} alt="" aria-hidden="true" />
                   </div>
                   <p className="invoice-delete-dialog__text">
-                    Are you sure you want to delete invoice {deleteTarget.id}? This action cannot be undone.
+                    Are you sure you want to delete invoice {deleteTarget.invoiceNumber || deleteTarget.id}? This action cannot be undone.
                   </p>
                 </div>
                 <div className="invoice-modal__footer">
-                  <button type="button" className="modal-text-button" onClick={closeModal}>
+                  <button type="button" className="modal-text-button" onClick={closeModal} disabled={submitting}>
                     Cancel
                   </button>
-                  <button type="button" className="invoice-delete-confirm" onClick={handleDeleteInvoice}>
-                    Delete
+                  <button type="button" className="invoice-delete-confirm" onClick={handleDeleteInvoice} disabled={submitting}>
+                    {submitting ? 'Deleting…' : 'Delete'}
                   </button>
                 </div>
               </div>
@@ -648,5 +667,5 @@ function formatInvoiceMoney(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
     useGrouping: false,
-  }).format(value);
+  }).format(value || 0);
 }

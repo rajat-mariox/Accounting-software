@@ -1,7 +1,6 @@
 export const settingsTabs = [
   { id: 'company', label: 'Company Info' },
   { id: 'tax', label: 'Tax Settings' },
-  { id: 'users', label: 'Users & Roles' },
 ];
 
 export const companySettings = {
