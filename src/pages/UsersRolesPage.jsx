@@ -11,6 +11,13 @@ import {
 import { sidebarItems } from '../data/dashboard';
 import { userRoleCount, userRows } from '../data/users';
 import {
+  isNonEmpty,
+  isStrongEnoughPassword,
+  isValidEmail,
+  isValidPhone,
+  sanitizePhoneInput,
+} from '../utils/validators';
+import {
   usersTotalIconSrc,
   usersActiveIconSrc,
   usersInactiveIconSrc,
@@ -24,6 +31,7 @@ import {
 } from '../utils/images';
 import '../styles/dashboard.css';
 import '../styles/users.css';
+import '../styles/form-errors.css';
 
 const roleOptions = [
   { value: 'Administrator', tone: 'admin' },
@@ -43,6 +51,43 @@ const emptyForm = {
 };
 
 const permissionsList = ['View Records', 'Basic Operations', 'Limited Access'];
+
+function validateUserForm(form, mode, existingUsers, currentUserId) {
+  const errors = {};
+  if (!isNonEmpty(form.name)) {
+    errors.name = 'Full name is required.';
+  } else if (form.name.trim().length < 2) {
+    errors.name = 'Full name must be at least 2 characters.';
+  }
+  if (!isNonEmpty(form.email)) {
+    errors.email = 'Email is required.';
+  } else if (!isValidEmail(form.email)) {
+    errors.email = 'Enter a valid email address.';
+  } else {
+    const trimmed = form.email.trim().toLowerCase();
+    const taken = existingUsers.some(
+      (user) => user.email.toLowerCase() === trimmed && user.id !== currentUserId,
+    );
+    if (taken) errors.email = 'A user with this email already exists.';
+  }
+  if (mode === 'add') {
+    if (!isNonEmpty(form.password)) {
+      errors.password = 'Password is required.';
+    } else if (!isStrongEnoughPassword(form.password, 6)) {
+      errors.password = 'Password must be at least 6 characters.';
+    }
+  } else if (isNonEmpty(form.password) && !isStrongEnoughPassword(form.password, 6)) {
+    errors.password = 'Password must be at least 6 characters.';
+  }
+  if (!isNonEmpty(form.phone)) {
+    errors.phone = 'Phone is required.';
+  } else if (!isValidPhone(form.phone)) {
+    errors.phone = 'Phone must be exactly 10 digits.';
+  }
+  if (!isNonEmpty(form.role)) errors.role = 'Select a role.';
+  if (!isNonEmpty(form.status)) errors.status = 'Select a status.';
+  return errors;
+}
 
 function buildInitials(name) {
   return name
@@ -64,6 +109,7 @@ export default function UsersRolesPage() {
   const [modalMode, setModalMode] = useState(null); // 'add' | 'edit' | 'delete' | null
   const [selectedUser, setSelectedUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
 
   const stats = useMemo(() => {
@@ -79,6 +125,7 @@ export default function UsersRolesPage() {
 
   function openAddModal() {
     setForm(emptyForm);
+    setErrors({});
     setSelectedUser(null);
     setShowPassword(false);
     setModalMode('add');
@@ -90,10 +137,11 @@ export default function UsersRolesPage() {
       name: user.name,
       email: user.email,
       password: '',
-      phone: user.phone,
+      phone: sanitizePhoneInput(user.phone),
       role: user.role,
       status: capitalize(user.status),
     });
+    setErrors({});
     setShowPassword(false);
     setModalMode('edit');
   }
@@ -106,17 +154,26 @@ export default function UsersRolesPage() {
   function closeModal() {
     setModalMode(null);
     setSelectedUser(null);
+    setErrors({});
   }
 
   function handleChange(event) {
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    const nextValue = name === 'phone' ? sanitizePhoneInput(value) : value;
+    setForm((current) => ({ ...current, [name]: nextValue }));
+    setErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   function handleSubmit(event) {
     event.preventDefault();
-    const passwordRequired = modalMode === 'add';
-    if (!form.name || !form.email || !form.role || !form.status || (passwordRequired && !form.password)) {
+    const validationErrors = validateUserForm(form, modalMode, users, selectedUser?.id);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
 
@@ -297,7 +354,7 @@ export default function UsersRolesPage() {
                   </button>
                 </header>
 
-                <form className="users-modal__body" onSubmit={handleSubmit}>
+                <form className="users-modal__body" onSubmit={handleSubmit} noValidate>
                   <div className="users-form-field">
                     <label htmlFor="users-form-name">
                       Full Name<span className="users-form-required">*</span>
@@ -309,8 +366,10 @@ export default function UsersRolesPage() {
                       placeholder="Enter full name"
                       value={form.name}
                       onChange={handleChange}
-                      required
+                      aria-invalid={Boolean(errors.name)}
+                      className={errors.name ? 'field-input--invalid' : ''}
                     />
+                    {errors.name ? <span className="field-error">{errors.name}</span> : null}
                   </div>
 
                   <div className="users-form-field">
@@ -324,8 +383,10 @@ export default function UsersRolesPage() {
                       placeholder="user@example.com"
                       value={form.email}
                       onChange={handleChange}
-                      required
+                      aria-invalid={Boolean(errors.email)}
+                      className={errors.email ? 'field-input--invalid' : ''}
                     />
+                    {errors.email ? <span className="field-error">{errors.email}</span> : null}
                   </div>
 
                   <div className="users-form-field">
@@ -341,7 +402,8 @@ export default function UsersRolesPage() {
                         placeholder={modalMode === 'edit' ? 'Leave blank to keep current' : 'Enter password'}
                         value={form.password}
                         onChange={handleChange}
-                        required={modalMode === 'add'}
+                        aria-invalid={Boolean(errors.password)}
+                        className={errors.password ? 'field-input--invalid' : ''}
                       />
                       <button
                         type="button"
@@ -352,18 +414,27 @@ export default function UsersRolesPage() {
                         {showPassword ? <EyeOffIcon /> : <ViewIcon />}
                       </button>
                     </div>
+                    {errors.password ? <span className="field-error">{errors.password}</span> : null}
                   </div>
 
                   <div className="users-form-field">
-                    <label htmlFor="users-form-phone">Phone</label>
+                    <label htmlFor="users-form-phone">
+                      Phone<span className="users-form-required">*</span>
+                    </label>
                     <input
                       id="users-form-phone"
                       name="phone"
                       type="tel"
-                      placeholder="+1-555-0000"
+                      inputMode="numeric"
+                      maxLength={10}
+                      pattern="\d{10}"
+                      placeholder="10-digit phone number"
                       value={form.phone}
                       onChange={handleChange}
+                      aria-invalid={Boolean(errors.phone)}
+                      className={errors.phone ? 'field-input--invalid' : ''}
                     />
+                    {errors.phone ? <span className="field-error">{errors.phone}</span> : null}
                   </div>
 
                   <div className="users-form-field">
@@ -376,7 +447,8 @@ export default function UsersRolesPage() {
                         name="role"
                         value={form.role}
                         onChange={handleChange}
-                        required
+                        aria-invalid={Boolean(errors.role)}
+                        className={errors.role ? 'field-input--invalid' : ''}
                       >
                         <option value="" disabled hidden></option>
                         {roleOptions.map((option) => (
@@ -392,6 +464,7 @@ export default function UsersRolesPage() {
                         className="users-form-select__chevron"
                       />
                     </div>
+                    {errors.role ? <span className="field-error">{errors.role}</span> : null}
                   </div>
 
                   <div className="users-form-field">
@@ -404,7 +477,8 @@ export default function UsersRolesPage() {
                         name="status"
                         value={form.status}
                         onChange={handleChange}
-                        required
+                        aria-invalid={Boolean(errors.status)}
+                        className={errors.status ? 'field-input--invalid' : ''}
                       >
                         <option value="" disabled hidden></option>
                         {statusOptions.map((option) => (
@@ -420,6 +494,7 @@ export default function UsersRolesPage() {
                         className="users-form-select__chevron"
                       />
                     </div>
+                    {errors.status ? <span className="field-error">{errors.status}</span> : null}
                   </div>
 
                   <div className="users-permissions">
