@@ -17,6 +17,7 @@ import {
   PurchaseMetricIcon,
   PendingMetricIcon,
   StockMetricIcon,
+  UsersRolesIcon,
   WarningIcon,
   InvoiceAlertIcon,
 } from '../components/dashboard/icons';
@@ -29,6 +30,7 @@ import {
   paymentIconSrc,
   reportIconSrc,
   settingIconSrc,
+  userRoleIconSrc,
 } from '../utils/images';
 
 export const sidebarItems = [
@@ -39,6 +41,7 @@ export const sidebarItems = [
   { label: 'Invoices', icon: InvoicesIcon, iconSrc: invoiceIconSrc, path: '/invoices' },
   { label: 'Payments', icon: PaymentsIcon, iconSrc: paymentIconSrc, path: '/payments' },
   { label: 'Reports', icon: ReportsIcon, iconSrc: reportIconSrc, path: '/reports' },
+  { label: 'Users & Roles', icon: UsersRolesIcon, iconSrc: userRoleIconSrc, path: '/users-roles' },
   { label: 'Settings', icon: SettingsIcon, iconSrc: settingIconSrc, path: '/settings' },
   { label: 'Audit Logs', icon: AuditLogsIcon, iconSrc: auditIconSrc, path: '/audit-logs' },
 ];
