@@ -79,6 +79,12 @@ export default function LoginPage() {
             iconSrc={loginLockIconSrc}
           />
 
+          <div className="auth-row-end">
+            <Link className="auth-link" to="/forgot-password">
+              Forgot password?
+            </Link>
+          </div>
+
           {error ? <p className="auth-error">{error}</p> : null}
 
           <button className="primary-button" type="submit" disabled={submitting}>

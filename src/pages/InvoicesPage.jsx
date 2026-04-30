@@ -41,6 +41,128 @@ function formatDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildInvoiceHtml(invoice) {
+  const number = invoice.invoiceNumber || invoice.id;
+  const items = invoice.items || [];
+  const rows = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(item.name)}</td>
+          <td style="text-align:center">${escapeHtml(item.quantity)}</td>
+          <td style="text-align:right">${formatInvoiceMoney(item.price)}</td>
+          <td style="text-align:right">${formatInvoiceMoney(item.price * item.quantity)}</td>
+        </tr>`,
+    )
+    .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Invoice ${escapeHtml(number)}</title>
+<style>
+  body { font-family: 'Inter', Arial, sans-serif; color: #1f2937; margin: 40px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1d4ed8; padding-bottom: 16px; margin-bottom: 24px; }
+  .header h1 { margin: 0; color: #1d4ed8; font-size: 28px; }
+  .meta { margin-top: 8px; font-size: 14px; color: #4b5563; }
+  .meta div { margin-bottom: 4px; }
+  .panels { display: flex; gap: 32px; margin-bottom: 24px; }
+  .panel { flex: 1; }
+  .panel h3 { margin: 0 0 6px 0; font-size: 13px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.04em; }
+  .panel p { margin: 0; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  th { background: #f3f4f6; text-align: left; padding: 10px 12px; font-size: 13px; color: #374151; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+  .totals { display: flex; justify-content: flex-end; }
+  .totals-box { min-width: 240px; }
+  .totals-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 15px; }
+  .totals-row.grand { border-top: 2px solid #1f2937; margin-top: 4px; padding-top: 12px; font-size: 18px; font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+  .pill.paid { background: #dcfce7; color: #166534; }
+  .pill.pending { background: #fef9c3; color: #854d0e; }
+  .pill.overdue { background: #fee2e2; color: #b91c1c; }
+  @media print { body { margin: 20px; } }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>INVOICE</h1>
+      <div class="meta">
+        <div><strong>Invoice #:</strong> ${escapeHtml(number)}</div>
+        <div><strong>Status:</strong> <span class="pill ${escapeHtml(invoice.status)}">${escapeHtml(invoice.status)}</span></div>
+      </div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:18px; font-weight:600; color:#1d4ed8;">Jubba group</div>
+      <div class="meta">ERP System</div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <h3>Bill To</h3>
+      <p>${escapeHtml(invoice.clientName || '')}</p>
+    </div>
+    <div class="panel">
+      <h3>Created</h3>
+      <p>${escapeHtml(formatDate(invoice.createdDate))}</p>
+    </div>
+    <div class="panel">
+      <h3>Due Date</h3>
+      <p>${escapeHtml(formatDate(invoice.dueDate))}</p>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th style="text-align:center">Qty</th>
+        <th style="text-align:right">Price</th>
+        <th style="text-align:right">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || '<tr><td colspan="4" style="text-align:center; color:#6b7280">No items</td></tr>'}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="totals-box">
+      <div class="totals-row grand">
+        <span>Total</span>
+        <span>${formatInvoiceMoney(invoice.amount)}</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function downloadInvoice(invoice) {
+  const html = buildInvoiceHtml(invoice);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${invoice.invoiceNumber || invoice.id}.html`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function validateInvoiceForm(form, draftItems) {
   const errors = {};
   if (!isNonEmpty(form.clientId)) errors.clientId = 'Select a client.';
@@ -363,7 +485,12 @@ export default function InvoicesPage({ initialAction }) {
                                 Mark Paid
                               </button>
                             ) : (
-                              <button type="button" className="invoice-icon-action" aria-label={`Download ${invoice.invoiceNumber || invoice.id}`}>
+                              <button
+                                type="button"
+                                className="invoice-icon-action"
+                                aria-label={`Download ${invoice.invoiceNumber || invoice.id}`}
+                                onClick={() => downloadInvoice(invoice)}
+                              >
                                 <img src={invoiceDownloadIconSrc} alt="" aria-hidden="true" />
                               </button>
                             )}

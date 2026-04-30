@@ -4,6 +4,12 @@ export const authApi = {
   login: (email, password) => api.post('/auth/login', { email, password }, { auth: false }),
   register: (payload) => api.post('/auth/register', payload, { auth: false }),
   me: () => api.get('/auth/me'),
+  changePassword: (currentPassword, newPassword) =>
+    api.post('/auth/change-password', { currentPassword, newPassword }),
+  forgotPassword: (email) => api.post('/auth/forgot-password', { email }, { auth: false }),
+  verifyOtp: (email, otp) => api.post('/auth/verify-otp', { email, otp }, { auth: false }),
+  resetPassword: (email, resetToken, newPassword) =>
+    api.post('/auth/reset-password', { email, resetToken, newPassword }, { auth: false }),
 };
 
 export const usersApi = {
