@@ -189,6 +189,27 @@ export default function DashboardTopbar({ user }) {
               <button
                 type="button"
                 role="menuitem"
+                className="user-menu__item"
+                onClick={() => {
+                  setIsUserMenuOpen(false);
+                  navigate('/settings?tab=account');
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 9a7 7 0 0 1 14 0"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                My Account
+              </button>
+              <button
+                type="button"
+                role="menuitem"
                 className="user-menu__item user-menu__item--danger"
                 onClick={handleLogout}
               >

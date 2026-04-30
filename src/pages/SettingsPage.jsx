@@ -1,21 +1,38 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { CheckCircleIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
 import { settingsTabs } from '../data/settings';
-import { settingsApi } from '../api';
-import { isValidPhone, sanitizePhoneInput } from '../utils/validators';
-import { settingsCompanyIconSrc, taxConfigIconSrc } from '../utils/images';
+import { authApi, settingsApi } from '../api';
+import { getStoredUser, setStoredUser } from '../utils/auth';
+import { isStrongEnoughPassword, isValidPhone, sanitizePhoneInput } from '../utils/validators';
+import {
+  settingsCompanyIconSrc,
+  taxConfigIconSrc,
+  usersRolesShieldIconSrc,
+} from '../utils/images';
 import '../styles/dashboard.css';
 import '../styles/settings.css';
 import '../styles/form-errors.css';
 
 const emptyCompany = { name: '', email: '', phone: '', address: '' };
 const emptyTax = { rate: 0, registrationNumber: '' };
+const emptyPasswordForm = { currentPassword: '', newPassword: '', confirmPassword: '' };
+
+const VALID_TABS = new Set(settingsTabs.map((t) => t.id));
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('company');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const initialTab = (() => {
+    const params = new URLSearchParams(location.search);
+    const candidate = params.get('tab');
+    return candidate && VALID_TABS.has(candidate) ? candidate : 'company';
+  })();
+
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [company, setCompany] = useState(emptyCompany);
   const [tax, setTax] = useState(emptyTax);
   const [loading, setLoading] = useState(true);
@@ -24,6 +41,36 @@ export default function SettingsPage() {
   const [savingCompany, setSavingCompany] = useState(false);
   const [savingTax, setSavingTax] = useState(false);
   const [companyErrors, setCompanyErrors] = useState({});
+
+  const [profile, setProfile] = useState(() => getStoredUser());
+  const [passwordForm, setPasswordForm] = useState(emptyPasswordForm);
+  const [passwordErrors, setPasswordErrors] = useState({});
+  const [passwordError, setPasswordError] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    authApi
+      .me()
+      .then(({ user }) => {
+        if (cancelled || !user) return;
+        setProfile(user);
+        setStoredUser(user);
+      })
+      .catch(() => {
+        // soft-fail; topbar already handles 401 redirects
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function selectTab(tabId) {
+    setActiveTab(tabId);
+    const params = new URLSearchParams(location.search);
+    params.set('tab', tabId);
+    navigate({ pathname: location.pathname, search: `?${params.toString()}` }, { replace: true });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +169,58 @@ export default function SettingsPage() {
     }
   }
 
+  function handlePasswordChange(field) {
+    return (event) => {
+      const value = event.target.value;
+      setPasswordForm((current) => ({ ...current, [field]: value }));
+      setPasswordErrors((current) => {
+        if (!current[field]) return current;
+        const next = { ...current };
+        delete next[field];
+        return next;
+      });
+      if (passwordError) setPasswordError('');
+    };
+  }
+
+  function validatePasswordForm() {
+    const errors = {};
+    if (!passwordForm.currentPassword) {
+      errors.currentPassword = 'Current password is required.';
+    }
+    if (!passwordForm.newPassword) {
+      errors.newPassword = 'New password is required.';
+    } else if (!isStrongEnoughPassword(passwordForm.newPassword, 6)) {
+      errors.newPassword = 'New password must be at least 6 characters.';
+    } else if (passwordForm.newPassword === passwordForm.currentPassword) {
+      errors.newPassword = 'New password must be different from current password.';
+    }
+    if (passwordForm.confirmPassword !== passwordForm.newPassword) {
+      errors.confirmPassword = 'Passwords do not match.';
+    }
+    return errors;
+  }
+
+  async function savePassword() {
+    const errors = validatePasswordForm();
+    if (Object.keys(errors).length > 0) {
+      setPasswordErrors(errors);
+      return;
+    }
+    setSavingPassword(true);
+    setPasswordError('');
+    try {
+      await authApi.changePassword(passwordForm.currentPassword, passwordForm.newPassword);
+      setPasswordForm(emptyPasswordForm);
+      setPasswordErrors({});
+      setToast('Password updated');
+    } catch (err) {
+      setPasswordError(err.message || 'Could not update password.');
+    } finally {
+      setSavingPassword(false);
+    }
+  }
+
   return (
     <main className="dashboard-shell">
       <DashboardSidebar brand={{ title: 'Jubba group', subtitle: 'ERP System' }} items={sidebarItems} />
@@ -152,7 +251,7 @@ export default function SettingsPage() {
                 role="tab"
                 aria-selected={activeTab === tab.id}
                 className={`settings-tab${activeTab === tab.id ? ' settings-tab--active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
               >
                 {tab.label}
               </button>
@@ -160,6 +259,87 @@ export default function SettingsPage() {
           </div>
 
           {loading ? <p>Loading…</p> : null}
+
+          {activeTab === 'account' ? (
+            <>
+              <section className="settings-card">
+                <div className="settings-card__header">
+                  <div className="settings-card__title">
+                    <div className="settings-card__icon">
+                      <img src={usersRolesShieldIconSrc} alt="" aria-hidden="true" />
+                    </div>
+                    <div>
+                      <h2>Profile</h2>
+                      <p>Your account details</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-form settings-form--compact">
+                  <Field label="Name" value={profile?.name || ''} readOnly />
+                  <Field label="Email" value={profile?.email || ''} readOnly />
+                  <Field label="Role" value={profile?.role || ''} readOnly />
+                  {profile?.lastLogin ? (
+                    <Field
+                      label="Last sign-in"
+                      value={new Date(profile.lastLogin).toLocaleString()}
+                      readOnly
+                    />
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="settings-card">
+                <div className="settings-card__header">
+                  <div className="settings-card__title">
+                    <div className="settings-card__icon">
+                      <img src={usersRolesShieldIconSrc} alt="" aria-hidden="true" />
+                    </div>
+                    <div>
+                      <h2>Change Password</h2>
+                      <p>Update the password used to sign in</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-form settings-form--compact">
+                  <Field
+                    label="Current password"
+                    value={passwordForm.currentPassword}
+                    onChange={handlePasswordChange('currentPassword')}
+                    type="password"
+                    autoComplete="current-password"
+                    error={passwordErrors.currentPassword}
+                  />
+                  <Field
+                    label="New password"
+                    value={passwordForm.newPassword}
+                    onChange={handlePasswordChange('newPassword')}
+                    type="password"
+                    autoComplete="new-password"
+                    error={passwordErrors.newPassword}
+                  />
+                  <Field
+                    label="Confirm new password"
+                    value={passwordForm.confirmPassword}
+                    onChange={handlePasswordChange('confirmPassword')}
+                    type="password"
+                    autoComplete="new-password"
+                    error={passwordErrors.confirmPassword}
+                  />
+                  {passwordError ? <p className="auth-error">{passwordError}</p> : null}
+                  <button
+                    type="button"
+                    className="settings-primary-button"
+                    onClick={savePassword}
+                    disabled={savingPassword}
+                  >
+                    {savingPassword ? 'Updating…' : 'Update Password'}
+                  </button>
+                </div>
+              </section>
+            </>
+          ) : null}
 
           {activeTab === 'company' ? (
             <section className="settings-card">
