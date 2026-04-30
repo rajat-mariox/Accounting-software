@@ -47,6 +47,54 @@ export default function ReportsPage() {
     return <SalesReport sales={salesByMonth} topClients={topClients} />;
   }, [activeTab, loading, loadError, salesByMonth, topClients, overview]);
 
+  function handleExport() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (activeTab === 'inventory') {
+      const rows = [
+        ['Status', 'Count'],
+        ...overview.map((row) => [row.label, row.value]),
+      ];
+      downloadCsv(`inventory-report-${today}.csv`, toCsv(rows));
+      return;
+    }
+    if (activeTab === 'purchase') {
+      const { labels, values } = buildMonthlyView(salesByMonth);
+      const rows = [
+        ['Month', 'Total Purchases'],
+        ...labels.map((label, i) => [label, values[i].toFixed(2)]),
+      ];
+      downloadCsv(`purchase-report-${today}.csv`, toCsv(rows));
+      return;
+    }
+    // Sales tab — emit sales breakdown plus a "Top Clients" section.
+    const { labels, values, counts } = buildMonthlyView(salesByMonth);
+    const breakdownRows = [
+      ['Sales Breakdown'],
+      ['Month', 'Invoices', 'Total Sales', 'Avg Invoice Value'],
+      ...labels.map((label, i) => [
+        label,
+        counts[i],
+        values[i].toFixed(2),
+        (counts[i] > 0 ? values[i] / counts[i] : 0).toFixed(2),
+      ]),
+    ];
+    const topRows = [
+      [],
+      ['Top Clients'],
+      ['Rank', 'Client', 'Invoices', 'Total'],
+      ...topClients.map((client, i) => [
+        i + 1,
+        client.clientName,
+        client.invoices,
+        Number(client.total || 0).toFixed(2),
+      ]),
+    ];
+    downloadCsv(
+      `sales-report-${today}.csv`,
+      toCsv([...breakdownRows, ...topRows]),
+    );
+  }
+
   return (
     <main className="dashboard-shell">
       <DashboardSidebar brand={{ title: 'Jubba group', subtitle: 'ERP System' }} items={sidebarItems} />
@@ -61,7 +109,12 @@ export default function ReportsPage() {
               <p>View detailed business insights</p>
             </div>
 
-            <button type="button" className="reports-export-button">
+            <button
+              type="button"
+              className="reports-export-button"
+              onClick={handleExport}
+              disabled={loading || Boolean(loadError)}
+            >
               <img src={reportExportIconSrc} alt="" aria-hidden="true" className="reports-export-icon" />
               Export Report
             </button>
@@ -90,10 +143,20 @@ export default function ReportsPage() {
 }
 
 function buildMonthlyView(sales) {
-  const labels = sales.map((row) => `${MONTHS[row.id.month - 1]} '${String(row.id.year).slice(-2)}`);
-  const values = sales.map((row) => Number(row.total) || 0);
-  const counts = sales.map((row) => Number(row.count) || 0);
-  return { labels, values, counts };
+  // Always render Jan–Jun of the current year, zero-filling missing months so the
+  // chart x-axis is stable regardless of which months actually have invoices.
+  const currentYear = new Date().getFullYear();
+  const totals = new Map();
+  const counts = new Map();
+  sales.forEach((row) => {
+    if (row?.id?.year !== currentYear) return;
+    totals.set(row.id.month, Number(row.total) || 0);
+    counts.set(row.id.month, Number(row.count) || 0);
+  });
+  const labels = MONTHS.slice(0, 6);
+  const values = [1, 2, 3, 4, 5, 6].map((m) => totals.get(m) || 0);
+  const countsArr = [1, 2, 3, 4, 5, 6].map((m) => counts.get(m) || 0);
+  return { labels, values, counts: countsArr };
 }
 
 function SalesReport({ sales, topClients }) {
@@ -220,26 +283,66 @@ function InventoryReport({ overview }) {
 }
 
 function LineChart({ values, labels, stroke }) {
-  const width = 640;
-  const height = 280;
-  const padding = 30;
-  const points = createPoints(values, width, height, padding);
+  const width = 700;
+  const height = 360;
+  const padLeft = 60;
+  const padRight = 24;
+  const padTop = 24;
+  const padBottom = 36;
+  const chartW = width - padLeft - padRight;
+  const chartH = height - padTop - padBottom;
+
+  const max = Math.max(...values, 1);
+  const maxAxis = niceMax(max);
+  const step = maxAxis / 4;
+  const yTicks = [0, step, step * 2, step * 3, maxAxis];
+
+  const points = values.map((value, index) => {
+    const x = padLeft + (chartW * index) / Math.max(values.length - 1, 1);
+    const y = padTop + chartH - (value / maxAxis) * chartH;
+    return { x, y };
+  });
 
   return (
     <div className="report-chart">
       <svg viewBox={`0 0 ${width} ${height}`} className="report-chart__svg" role="img" aria-label="Line chart">
-        {renderGridLines(width, height)}
-        <path d={buildLinePath(points)} className="report-line" stroke={stroke} />
-        {points.map((point, index) => (
-          <circle key={labels[index]} cx={point.x} cy={point.y} r="4" className="report-line__dot" />
-        ))}
-      </svg>
+        {yTicks.map((tick) => {
+          const y = padTop + chartH - (tick / maxAxis) * chartH;
+          return (
+            <g key={`grid-${tick}`} className="chart-grid">
+              <line x1={padLeft} x2={width - padRight} y1={y} y2={y} />
+              <text
+                x={padLeft - 8}
+                y={y + 4}
+                className="chart-axis__label"
+                textAnchor="end"
+              >
+                {Math.round(tick)}
+              </text>
+            </g>
+          );
+        })}
 
-      <div className="chart-labels">
-        {labels.map((label) => (
-          <span key={label}>{label}</span>
+        <path d={buildSmoothPath(points)} className="report-line" stroke={stroke} fill="none" />
+        {points.map((point, index) => (
+          <circle key={`dot-${labels[index]}-${index}`} cx={point.x} cy={point.y} r="4" className="report-line__dot" stroke={stroke} fill={stroke} />
         ))}
-      </div>
+
+        {labels.map((label, index) => {
+          const x = padLeft + (chartW * index) / Math.max(values.length - 1, 1);
+          return (
+            <text
+              key={`xlabel-${label}-${index}`}
+              x={x}
+              y={height - 12}
+              className="chart-axis__label"
+              textAnchor="middle"
+            >
+              {label}
+            </text>
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -385,35 +488,48 @@ function PieChart({ segments }) {
   );
 }
 
-function renderGridLines(width, height) {
-  return (
-    <g className="chart-grid" aria-hidden="true">
-      {[40, 90, 140, 190, 240].map((y) => (
-        <line key={y} x1="30" x2={width - 12} y1={y} y2={y} />
-      ))}
-    </g>
-  );
+function escapeCsvCell(value) {
+  if (value == null) return '';
+  const str = String(value);
+  if (/[",\n\r]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }
 
-function createPoints(values, width, height, padding) {
-  if (values.length === 0) return [];
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const range = max - min || 1;
-  const usableWidth = width - padding * 2;
-  const usableHeight = height - padding * 2;
-
-  return values.map((value, index) => {
-    const x = padding + (usableWidth * index) / Math.max(values.length - 1, 1);
-    const y = padding + (1 - (value - min) / range) * usableHeight;
-    return { x, y };
-  });
+function toCsv(rows) {
+  return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
 }
 
-function buildLinePath(points) {
-  return points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
-    .join(' ');
+function downloadCsv(filename, csv) {
+  const BOM = '﻿';
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function buildSmoothPath(points) {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || p2;
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
 }
 
 function describeArc(cx, cy, r, startAngle, endAngle) {

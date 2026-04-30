@@ -110,5 +110,6 @@ export const reportsApi = {
     const qs = search.toString();
     return api.get(`/reports/sales${qs ? `?${qs}` : ''}`);
   },
+  salesVsPurchase: (months = 6) => api.get(`/reports/sales-vs-purchase?months=${months}`),
   topClients: () => api.get('/reports/top-clients'),
 };

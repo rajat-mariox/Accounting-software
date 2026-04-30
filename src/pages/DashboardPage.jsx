@@ -8,7 +8,6 @@ import StatCard from '../components/dashboard/StatCard';
 import { formatCurrency } from '../utils/formatters';
 import {
   quickActions,
-  salesVsPurchase,
   sidebarItems,
 } from '../data/dashboard';
 import { reportsApi, inventoryApi, invoicesApi } from '../api';
@@ -46,20 +45,25 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
   const [items, setItems] = useState([]);
   const [invoices, setInvoices] = useState([]);
-  const [salesByMonth, setSalesByMonth] = useState([]);
+  const [salesVsPurchase, setSalesVsPurchase] = useState({ labels: [], sales: [], purchases: [] });
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(new Set());
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([reportsApi.dashboard(), inventoryApi.list(), invoicesApi.list(), reportsApi.sales()])
-      .then(([summaryData, itemsData, invoicesData, salesData]) => {
+    Promise.all([
+      reportsApi.dashboard(),
+      inventoryApi.list(),
+      invoicesApi.list(),
+      reportsApi.salesVsPurchase(6),
+    ])
+      .then(([summaryData, itemsData, invoicesData, salesVsPurchaseData]) => {
         if (cancelled) return;
         setSummary(summaryData);
         setItems(itemsData);
         setInvoices(invoicesData);
-        setSalesByMonth(salesData);
+        setSalesVsPurchase(salesVsPurchaseData);
       })
       .catch(() => {
         // soft-fail — page renders with partial data
@@ -100,16 +104,8 @@ export default function DashboardPage() {
     }));
   }, [summary, invoices]);
 
-  const monthlyRevenueValues = useMemo(() => {
-    if (!salesByMonth || salesByMonth.length === 0) return [0];
-    return salesByMonth.map((row) => Number(row.total) || 0);
-  }, [salesByMonth]);
-
-  const monthlyRevenueLabels = useMemo(() => {
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    if (!salesByMonth || salesByMonth.length === 0) return ['—'];
-    return salesByMonth.map((row) => `${monthNames[row.id.month - 1]} '${String(row.id.year).slice(-2)}`);
-  }, [salesByMonth]);
+  const monthlyRevenueValues = salesVsPurchase.sales?.length ? salesVsPurchase.sales : [0];
+  const monthlyRevenueLabels = salesVsPurchase.labels?.length ? salesVsPurchase.labels : ['—'];
 
   const computedMetrics = useMemo(() => [
     {
@@ -226,8 +222,8 @@ export default function DashboardPage() {
           </section>
 
           <section className="charts-grid">
-            <ChartCard title="Sales vs Purchase" subtitle="Sample comparison" action="View all">
-              <SalesPurchaseChart />
+            <ChartCard title="Sales vs Purchase" subtitle="Sample comparison">
+              <SalesPurchaseChart data={salesVsPurchase} />
             </ChartCard>
 
             <ChartCard title="Monthly Revenue" subtitle="Revenue by month">
@@ -341,12 +337,51 @@ function ListCard({ title, action, children }) {
   );
 }
 
-function SalesPurchaseChart() {
+function niceTicks(dataMax, count = 4) {
+  if (!Number.isFinite(dataMax) || dataMax <= 0) {
+    const ticks = [];
+    for (let i = 0; i <= count; i++) ticks.push(i);
+    return { ticks, niceMax: count };
+  }
+  const rawStep = dataMax / count;
+  const exponent = Math.floor(Math.log10(rawStep));
+  const power = Math.pow(10, exponent);
+  const fraction = rawStep / power;
+  let niceFraction;
+  if (fraction <= 1) niceFraction = 1;
+  else if (fraction <= 2) niceFraction = 2;
+  else if (fraction <= 2.5) niceFraction = 2.5;
+  else if (fraction <= 5) niceFraction = 5;
+  else niceFraction = 10;
+  const step = niceFraction * power;
+  const ticks = [];
+  for (let i = 0; i <= count; i++) ticks.push(step * i);
+  return { ticks, niceMax: step * count };
+}
+
+function formatTickLabel(value) {
+  if (value === 0) return '0';
+  if (value >= 1_000_000) {
+    const m = value / 1_000_000;
+    return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    const k = value / 1000;
+    return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}K`;
+  }
+  return Math.round(value).toString();
+}
+
+function SalesPurchaseChart({ data }) {
   const width = 640;
   const height = 280;
-  const padding = 28;
-  const salesPoints = createPoints(salesVsPurchase.sales, width, height, padding);
-  const purchasePoints = createPoints(salesVsPurchase.purchases, width, height, padding);
+  const labels = data?.labels?.length ? data.labels : ['—'];
+  const sales = data?.sales?.length ? data.sales : [0];
+  const purchases = data?.purchases?.length ? data.purchases : [0];
+  const dataMax = Math.max(...sales, ...purchases, 1);
+  const { ticks, niceMax } = niceTicks(dataMax);
+  const salesPoints = createPoints(sales, width, niceMax);
+  const purchasePoints = createPoints(purchases, width, niceMax);
 
   return (
     <div className="chart-wrap">
@@ -355,7 +390,7 @@ function SalesPurchaseChart() {
         <span><i className="legend-dot legend-dot--green" />Purchase</span>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="line-chart" aria-label="Sales versus purchase chart" role="img">
-        {renderGridLines(width, height)}
+        {renderGridLines(width, ticks)}
         <path d={buildLinePath(salesPoints)} className="line-chart__path line-chart__path--blue" />
         <path d={buildLinePath(purchasePoints)} className="line-chart__path line-chart__path--green" />
         {salesPoints.map((point, index) => (
@@ -366,8 +401,8 @@ function SalesPurchaseChart() {
         ))}
       </svg>
       <div className="chart-labels">
-        {salesVsPurchase.labels.map((label) => (
-          <span key={label}>{label}</span>
+        {labels.map((label, index) => (
+          <span key={`${label}-${index}`}>{label}</span>
         ))}
       </div>
     </div>
@@ -379,7 +414,8 @@ function MonthlyRevenueChart({ values, labels }) {
   const height = 280;
   const safeValues = values.length > 0 ? values : [0];
   const safeLabels = labels.length > 0 ? labels : ['—'];
-  const maxValue = Math.max(...safeValues, 1);
+  const dataMax = Math.max(...safeValues, 1);
+  const { ticks, niceMax } = niceTicks(dataMax);
   const chartHeight = height - 40;
   const chartWidth = width - 54;
   const barWidth = Math.max(8, chartWidth / safeValues.length - 14);
@@ -387,47 +423,60 @@ function MonthlyRevenueChart({ values, labels }) {
   return (
     <div className="chart-wrap">
       <svg viewBox={`0 0 ${width} ${height}`} className="bar-chart" aria-label="Monthly revenue chart" role="img">
-        {renderGridLines(width, height)}
+        {renderGridLines(width, ticks)}
         {safeValues.map((value, index) => {
-          const barHeight = (value / maxValue) * chartHeight;
+          const barHeight = (value / niceMax) * chartHeight;
           const x = 32 + index * ((chartWidth / safeValues.length) + 14);
           const y = height - 28 - barHeight;
           return (
-            <g key={safeLabels[index]}>
+            <g key={`${safeLabels[index]}-${index}`}>
               <rect x={x} y={y} width={barWidth} height={barHeight} rx="10" className="bar-chart__bar" />
             </g>
           );
         })}
       </svg>
       <div className="chart-labels chart-labels--bars">
-        {safeLabels.map((label) => (
-          <span key={label}>{label}</span>
+        {safeLabels.map((label, index) => (
+          <span key={`${label}-${index}`}>{label}</span>
         ))}
       </div>
     </div>
   );
 }
 
-function renderGridLines(width, height) {
+function renderGridLines(width, ticks) {
+  const yPositions = [40, 90, 140, 190, 240];
   return (
     <g className="chart-grid" aria-hidden="true">
-      {[40, 90, 140, 190, 240].map((y) => (
-        <line key={y} x1="28" x2={width - 12} y1={y} y2={y} />
+      {yPositions.map((y) => (
+        <line key={`grid-${y}`} x1="28" x2={width - 12} y1={y} y2={y} />
       ))}
+      {Array.isArray(ticks) && ticks.length === yPositions.length
+        ? yPositions.map((y, i) => (
+            <text
+              key={`tick-${y}`}
+              x={24}
+              y={y + 3}
+              textAnchor="end"
+              className="chart-grid__tick"
+            >
+              {formatTickLabel(ticks[ticks.length - 1 - i])}
+            </text>
+          ))
+        : null}
     </g>
   );
 }
 
-function createPoints(values, width, height, padding) {
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const range = max - min || 1;
+function createPoints(values, width, niceMax) {
+  const padding = 28;
   const usableWidth = width - padding * 2;
-  const usableHeight = height - padding * 2;
-
+  const top = 40;
+  const bottom = 240;
   return values.map((value, index) => {
     const x = padding + (usableWidth * index) / Math.max(values.length - 1, 1);
-    const y = padding + (1 - (value - min) / range) * usableHeight;
+    const ratio = niceMax > 0 ? value / niceMax : 0;
+    const y = bottom - ratio * (bottom - top);
     return { x, y };
   });
 }
