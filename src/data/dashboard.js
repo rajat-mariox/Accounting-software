@@ -101,17 +101,6 @@ export const metrics = [
   },
 ];
 
-export const salesVsPurchase = {
-  labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-  sales: [48, 53, 50, 61, 58, 69],
-  purchases: [37, 40, 36, 42, 39, 45],
-};
-
-export const monthlyRevenue = {
-  labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-  values: [12, 13, 12, 18, 15, 20],
-};
-
 export const lowStockAlerts = [
   { name: 'Wireless Mouse', stock: 'Current stock: 15 piece', badge: 'Low Stock' },
   { name: 'USB-C Cable', stock: 'Current stock: 8 piece', badge: 'Low Stock' },

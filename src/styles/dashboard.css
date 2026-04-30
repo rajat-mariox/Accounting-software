@@ -978,6 +978,12 @@ body {
   stroke-dasharray: 2 4;
 }
 
+.chart-grid__tick {
+  font-size: 10px;
+  fill: #6b7280;
+  font-family: inherit;
+}
+
 .line-chart__path {
   fill: none;
   stroke-width: 2.5;
