@@ -414,33 +414,34 @@ export default function UsersRolesPage() {
                     {errors.email ? <span className="field-error">{errors.email}</span> : null}
                   </div>
 
-                  <div className="users-form-field">
-                    <label htmlFor="users-form-password">
-                      Password
-                      {modalMode === 'add' ? <span className="users-form-required">*</span> : null}
-                    </label>
-                    <div className="users-form-password">
-                      <input
-                        id="users-form-password"
-                        name="password"
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder={modalMode === 'edit' ? 'Leave blank to keep current' : 'Enter password'}
-                        value={form.password}
-                        onChange={handleChange}
-                        aria-invalid={Boolean(errors.password)}
-                        className={errors.password ? 'field-input--invalid' : ''}
-                      />
-                      <button
-                        type="button"
-                        className="users-form-password__toggle"
-                        onClick={() => setShowPassword((current) => !current)}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <EyeOffIcon /> : <ViewIcon />}
-                      </button>
+                  {modalMode === 'add' ? (
+                    <div className="users-form-field">
+                      <label htmlFor="users-form-password">
+                        Password<span className="users-form-required">*</span>
+                      </label>
+                      <div className="users-form-password">
+                        <input
+                          id="users-form-password"
+                          name="password"
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Enter password"
+                          value={form.password}
+                          onChange={handleChange}
+                          aria-invalid={Boolean(errors.password)}
+                          className={errors.password ? 'field-input--invalid' : ''}
+                        />
+                        <button
+                          type="button"
+                          className="users-form-password__toggle"
+                          onClick={() => setShowPassword((current) => !current)}
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showPassword ? <EyeOffIcon /> : <ViewIcon />}
+                        </button>
+                      </div>
+                      {errors.password ? <span className="field-error">{errors.password}</span> : null}
                     </div>
-                    {errors.password ? <span className="field-error">{errors.password}</span> : null}
-                  </div>
+                  ) : null}
 
                   <div className="users-form-field">
                     <label htmlFor="users-form-phone">
