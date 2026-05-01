@@ -411,35 +411,107 @@ function SalesPurchaseChart({ data }) {
 
 function MonthlyRevenueChart({ values, labels }) {
   const width = 640;
-  const height = 280;
+  const height = 320;
+  const padTop = 24;
+  const padBottom = 56;
+  const padLeft = 56;
+  const padRight = 24;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
   const safeValues = values.length > 0 ? values : [0];
   const safeLabels = labels.length > 0 ? labels : ['—'];
-  const dataMax = Math.max(...safeValues, 1);
+  const positiveValues = safeValues.map((v) => Math.max(0, Number(v) || 0));
+  const dataMax = Math.max(...positiveValues, 1);
   const { ticks, niceMax } = niceTicks(dataMax);
-  const chartHeight = height - 40;
-  const chartWidth = width - 54;
-  const barWidth = Math.max(8, chartWidth / safeValues.length - 14);
+
+  const slotWidth = plotWidth / safeValues.length;
+  const barWidth = Math.min(48, Math.max(12, slotWidth * 0.55));
+  const baselineY = padTop + plotHeight;
 
   return (
-    <div className="chart-wrap">
-      <svg viewBox={`0 0 ${width} ${height}`} className="bar-chart" aria-label="Monthly revenue chart" role="img">
-        {renderGridLines(width, ticks)}
-        {safeValues.map((value, index) => {
-          const barHeight = (value / niceMax) * chartHeight;
-          const x = 32 + index * ((chartWidth / safeValues.length) + 14);
-          const y = height - 28 - barHeight;
+    <div className="chart-wrap chart-wrap--bar">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="bar-chart"
+        aria-label="Monthly revenue chart"
+        role="img"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <linearGradient id="monthly-revenue-bar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--ds-brand)" stopOpacity="1" />
+            <stop offset="100%" stopColor="var(--ds-brand)" stopOpacity="0.55" />
+          </linearGradient>
+        </defs>
+
+        <g className="chart-grid" aria-hidden="true">
+          {ticks.map((tick, i) => {
+            const ratio = niceMax > 0 ? tick / niceMax : 0;
+            const y = baselineY - ratio * plotHeight;
+            return (
+              <g key={`grid-${i}`}>
+                <line x1={padLeft} x2={width - padRight} y1={y} y2={y} />
+                <text
+                  x={padLeft - 10}
+                  y={y + 4}
+                  textAnchor="end"
+                  className="chart-grid__tick"
+                >
+                  {formatTickLabel(tick)}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+
+        <line
+          x1={padLeft}
+          x2={width - padRight}
+          y1={baselineY}
+          y2={baselineY}
+          className="bar-chart__baseline"
+        />
+
+        {safeValues.map((value, i) => {
+          const v = Math.max(0, Number(value) || 0);
+          const barHeight = (v / niceMax) * plotHeight;
+          const slotCenter = padLeft + slotWidth * (i + 0.5);
+          const x = slotCenter - barWidth / 2;
+          const y = baselineY - barHeight;
           return (
-            <g key={`${safeLabels[index]}-${index}`}>
-              <rect x={x} y={y} width={barWidth} height={barHeight} rx="10" className="bar-chart__bar" />
+            <g key={`${safeLabels[i]}-${i}`} className="bar-chart__group">
+              <rect
+                x={x}
+                y={y}
+                width={barWidth}
+                height={barHeight}
+                rx="6"
+                className="bar-chart__bar"
+                fill="url(#monthly-revenue-bar)"
+              />
+              {v > 0 && (
+                <text
+                  x={slotCenter}
+                  y={y - 8}
+                  textAnchor="middle"
+                  className="bar-chart__value"
+                >
+                  {formatTickLabel(v)}
+                </text>
+              )}
+              <text
+                x={slotCenter}
+                y={baselineY + 24}
+                textAnchor="middle"
+                className="bar-chart__label"
+              >
+                {safeLabels[i]}
+              </text>
             </g>
           );
         })}
       </svg>
-      <div className="chart-labels chart-labels--bars">
-        {safeLabels.map((label, index) => (
-          <span key={`${label}-${index}`}>{label}</span>
-        ))}
-      </div>
     </div>
   );
 }

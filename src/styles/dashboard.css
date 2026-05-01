@@ -1013,6 +1013,41 @@ body {
 
 .bar-chart__bar {
   fill: var(--ds-brand);
+  transition: filter 160ms ease, transform 160ms ease;
+  transform-box: fill-box;
+  transform-origin: bottom center;
+}
+
+.bar-chart__group:hover .bar-chart__bar {
+  filter: brightness(1.05);
+}
+
+.bar-chart__baseline {
+  stroke: #dfe5ed;
+  stroke-width: 1;
+}
+
+.bar-chart__value {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #1f2937;
+  font-family: inherit;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.bar-chart__group:hover .bar-chart__value {
+  opacity: 1;
+}
+
+.bar-chart__label {
+  font-size: 12px;
+  fill: var(--ds-text-muted);
+  font-family: inherit;
+}
+
+.chart-wrap--bar {
+  padding-top: 4px;
 }
 
 .chart-labels {
