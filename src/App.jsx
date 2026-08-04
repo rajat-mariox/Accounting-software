@@ -1,7 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import ClientsPage from './pages/ClientsPage';
+import ComingSoonPage from './pages/ComingSoonPage';
 import DashboardPage from './pages/DashboardPage';
-import InventoryPage from './pages/InventoryPage';
+// Suppliers and Inventory are hidden for this milestone — swap ComingSoonPage back
+// to these pages in the routes below to re-enable them.
+// import InventoryPage from './pages/InventoryPage';
+// import SuppliersPage from './pages/SuppliersPage';
 import InvoicesPage from './pages/InvoicesPage';
 import LoginPage from './pages/LoginPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -9,7 +13,6 @@ import PaymentsPage from './pages/PaymentsPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 import AuditLogsPage from './pages/AuditLogsPage';
-import SuppliersPage from './pages/SuppliersPage';
 import UsersRolesPage from './pages/UsersRolesPage';
 import PrivateRoute from './components/routes/PrivateRoute';
 import PublicRoute from './components/routes/PublicRoute';
@@ -67,7 +70,7 @@ function App() {
           path="/suppliers"
           element={
             <PrivateRoute>
-              <SuppliersPage />
+              <ComingSoonPage title="Suppliers" />
             </PrivateRoute>
           }
         />
@@ -75,7 +78,7 @@ function App() {
           path="/inventory"
           element={
             <PrivateRoute>
-              <InventoryPage />
+              <ComingSoonPage title="Inventory" />
             </PrivateRoute>
           }
         />
@@ -83,7 +86,7 @@ function App() {
           path="/items/add"
           element={
             <PrivateRoute>
-              <InventoryPage initialAction="add" />
+              <ComingSoonPage title="Inventory" />
             </PrivateRoute>
           }
         />

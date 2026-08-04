@@ -65,7 +65,8 @@ export const alerts = [
 
 export const quickActions = [
   { label: 'Add Client', icon: AddClientIcon },
-  { label: 'Add Item', icon: AddItemIcon },
+  // Inventory is hidden for this milestone — restore this action when the module is re-enabled.
+  // { label: 'Add Item', icon: AddItemIcon },
   { label: 'New Invoice', icon: NewInvoiceIcon },
   { label: 'Record Payment', icon: RecordPaymentIcon },
 ];
