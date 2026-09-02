@@ -4,8 +4,14 @@ import { BellIcon, ChevronDownIcon, SearchIcon } from './icons';
 import NotificationPanel from './NotificationPanel';
 import { notificationsApi } from '../../api';
 import { clearStoredAuth, getStoredUser, getStoredToken } from '../../utils/auth';
+import {
+  isSoundEnabled,
+  playNotificationChime,
+  setSoundEnabled,
+  unlockNotificationSound,
+} from '../../utils/notificationSound';
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 15_000;
 
 function buildInitials(name) {
   return (name || '')
@@ -24,8 +30,31 @@ export default function DashboardTopbar({ user }) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [storedUser, setStoredUserState] = useState(() => getStoredUser());
+  const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
   const notifWrapRef = useRef(null);
   const userMenuRef = useRef(null);
+  // Last unread count we've seen; null until the first fetch so we don't chime on page load.
+  const lastUnreadRef = useRef(null);
+
+  useEffect(() => {
+    unlockNotificationSound();
+  }, []);
+
+  // Play the chime whenever the unread count goes up between polls.
+  const applyUnreadCount = useCallback((count) => {
+    const next = Number(count) || 0;
+    const previous = lastUnreadRef.current;
+    if (previous !== null && next > previous) playNotificationChime();
+    lastUnreadRef.current = next;
+    setUnreadCount(next);
+  }, []);
+
+  function toggleSound() {
+    const next = !soundOn;
+    setSoundEnabled(next);
+    setSoundOn(next);
+    if (next) playNotificationChime();
+  }
 
   useEffect(() => {
     function syncUser() {
@@ -43,22 +72,22 @@ export default function DashboardTopbar({ user }) {
     if (!getStoredToken()) return;
     try {
       const { count } = await notificationsApi.unreadCount();
-      setUnreadCount(count || 0);
+      applyUnreadCount(count || 0);
     } catch {
       // soft-fail; bell badge stays at last known value
     }
-  }, []);
+  }, [applyUnreadCount]);
 
   const refreshList = useCallback(async () => {
     if (!getStoredToken()) return;
     try {
       const rows = await notificationsApi.list({ limit: 20 });
       setNotifications(rows);
-      setUnreadCount(rows.filter((n) => !n.read).length);
+      applyUnreadCount(rows.filter((n) => !n.read).length);
     } catch {
       // soft-fail
     }
-  }, []);
+  }, [applyUnreadCount]);
 
   useEffect(() => {
     refreshUnreadCount();
@@ -161,6 +190,8 @@ export default function DashboardTopbar({ user }) {
               unreadCount={unreadCount}
               onItemClick={handleNotificationClick}
               onMarkAllRead={handleMarkAllRead}
+              soundOn={soundOn}
+              onToggleSound={toggleSound}
               onClose={() => setIsNotifOpen(false)}
             />
           )}

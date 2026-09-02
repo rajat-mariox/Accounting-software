@@ -1,11 +1,8 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import ClientsPage from './pages/ClientsPage';
-import ComingSoonPage from './pages/ComingSoonPage';
 import DashboardPage from './pages/DashboardPage';
-// Suppliers and Inventory are hidden for this milestone — swap ComingSoonPage back
-// to these pages in the routes below to re-enable them.
-// import InventoryPage from './pages/InventoryPage';
-// import SuppliersPage from './pages/SuppliersPage';
+import InventoryPage from './pages/InventoryPage';
+import SuppliersPage from './pages/SuppliersPage';
 import InvoicesPage from './pages/InvoicesPage';
 import LoginPage from './pages/LoginPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -45,7 +42,7 @@ function App() {
         <Route
           path="/dashboard"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="dashboard">
               <DashboardPage />
             </PrivateRoute>
           }
@@ -53,7 +50,7 @@ function App() {
         <Route
           path="/clients"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="clients">
               <ClientsPage />
             </PrivateRoute>
           }
@@ -61,7 +58,7 @@ function App() {
         <Route
           path="/clients/add"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="clients">
               <ClientsPage initialAction="add" />
             </PrivateRoute>
           }
@@ -69,31 +66,31 @@ function App() {
         <Route
           path="/suppliers"
           element={
-            <PrivateRoute>
-              <ComingSoonPage title="Suppliers" />
+            <PrivateRoute module="suppliers">
+              <SuppliersPage />
             </PrivateRoute>
           }
         />
         <Route
           path="/inventory"
           element={
-            <PrivateRoute>
-              <ComingSoonPage title="Inventory" />
+            <PrivateRoute module="inventory">
+              <InventoryPage />
             </PrivateRoute>
           }
         />
         <Route
           path="/items/add"
           element={
-            <PrivateRoute>
-              <ComingSoonPage title="Inventory" />
+            <PrivateRoute module="inventory">
+              <InventoryPage initialAction="add" />
             </PrivateRoute>
           }
         />
         <Route
           path="/invoices"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="invoices">
               <InvoicesPage />
             </PrivateRoute>
           }
@@ -101,7 +98,7 @@ function App() {
         <Route
           path="/invoices/add"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="invoices">
               <InvoicesPage initialAction="add" />
             </PrivateRoute>
           }
@@ -109,7 +106,7 @@ function App() {
         <Route
           path="/payments"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="payments">
               <PaymentsPage />
             </PrivateRoute>
           }
@@ -117,7 +114,7 @@ function App() {
         <Route
           path="/payments/add"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="payments">
               <PaymentsPage initialAction="add" />
             </PrivateRoute>
           }
@@ -125,7 +122,7 @@ function App() {
         <Route
           path="/reports"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="reports">
               <ReportsPage />
             </PrivateRoute>
           }
@@ -133,7 +130,7 @@ function App() {
         <Route
           path="/users-roles"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="users">
               <UsersRolesPage />
             </PrivateRoute>
           }
@@ -149,7 +146,7 @@ function App() {
         <Route
           path="/audit-logs"
           element={
-            <PrivateRoute>
+            <PrivateRoute module="auditLogs">
               <AuditLogsPage />
             </PrivateRoute>
           }

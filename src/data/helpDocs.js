@@ -84,22 +84,44 @@ export const helpTopics = [
   {
     id: 'invoices',
     label: 'Invoices',
-    summary: 'Create, send, and track customer invoices.',
+    summary: 'Create invoices with discount, tax, upfront payment, and a promised next payment date.',
     sections: [
       {
         heading: 'Creating an invoice',
         steps: [
-          'Open Invoices and click "New Invoice".',
-          'Pick a client, add line items from inventory, and set the due date.',
-          'Status flows: Draft → Pending → Paid. Overdue is set automatically past the due date.',
+          'Open Invoices and click "Create Invoice".',
+          'Pick a client, set the created date and due date.',
+          'Add line items from inventory — you can only invoice what is in stock, and stock is deducted as soon as the invoice is created.',
+          'Discount (%) and Tax (%) are pre-filled from the client\'s defaults but can be changed per invoice. The totals box shows subtotal → discount → tax → total live.',
+          'Invoice numbers are assigned automatically in the JGC-MM-### format and never repeat.',
+        ],
+      },
+      {
+        heading: 'Payment section (paying now + next payment date)',
+        steps: [
+          'Tick "Client is paying an amount now" if the client hands over any amount at invoice time.',
+          'Enter the Amount Received and pick the Payment Mode (Bank Transfer, Cash, Card, or Cheque). The totals box shows Paying Now and the remaining Balance Due.',
+          'Use Next Payment Date to record when the client promised to pay the balance. It is optional and hides automatically if the amount received covers the full total.',
+          'The upfront amount is saved as a real entry on the Payments page, and the invoice status becomes "partially paid" (or "paid" if it covers the full amount).',
+          'The next payment date shows in the invoice list under the status, in the View dialog, and on the downloaded PDF next to Balance Due. It clears automatically once the invoice is fully paid.',
         ],
       },
       {
         heading: 'Statuses at a glance',
         steps: [
-          'Paid — full payment recorded against the invoice.',
-          'Pending — issued but not yet paid; still within due date.',
+          'Pending — issued, nothing received yet.',
+          'Partially paid — some amount received; the list shows how much is still due and the next payment date.',
+          'Paid — full amount received; the PDF download becomes available.',
           'Overdue — past due date with a remaining balance.',
+          'Cancelled — invoice voided; its stock returns to inventory.',
+        ],
+      },
+      {
+        heading: 'After creation',
+        steps: [
+          '"Mark Paid" settles the full remaining amount in one click.',
+          'Deleting an invoice returns its quantities to inventory.',
+          'Use View to see items, discount, tax, paid amount, balance due, and the next payment date.',
         ],
       },
     ],
@@ -107,14 +129,21 @@ export const helpTopics = [
   {
     id: 'payments',
     label: 'Payments',
-    summary: 'Record incoming payments and reconcile invoices.',
+    summary: 'Record incoming payments — upfront at invoice time or later from the Payments page.',
     sections: [
       {
-        heading: 'Recording a payment',
+        heading: 'Two ways to record a payment',
         steps: [
-          'Go to Payments and click "Record Payment".',
-          'Choose the invoice, enter the amount and payment method.',
-          'Partial payments reduce the outstanding balance; the invoice closes when fully paid.',
+          'At invoice time — tick "Client is paying an amount now" in the Create Invoice dialog; the payment is recorded automatically.',
+          'Later — go to Payments and click "Record Payment", choose the invoice, enter the amount and payment mode.',
+        ],
+      },
+      {
+        heading: 'How balances work',
+        steps: [
+          'A payment can never exceed the invoice\'s outstanding balance, and cancelled invoices do not accept payments.',
+          'Partial payments set the invoice to "partially paid"; it becomes "paid" automatically when the running total covers the full amount.',
+          'Deleting a payment recalculates the invoice\'s paid total and status.',
         ],
       },
     ],
@@ -187,9 +216,24 @@ export const helpTopics = [
         heading: 'Frequently asked',
         faqs: [
           {
-            question: 'My data disappeared after a refresh — why?',
+            question: 'The client paid only part of the invoice — how do I record that?',
             answer:
-              'This build is a demo workspace running in your browser. Records live in memory and reset when you reload. A persistent backend is on the roadmap.',
+              'While creating the invoice, tick "Client is paying an amount now" and enter what they gave; add a Next Payment Date for the rest. For an existing invoice, record the partial amount from the Payments page. Either way the invoice shows as "partially paid" with the balance due.',
+          },
+          {
+            question: 'Where do I see when a client promised to pay the balance?',
+            answer:
+              'The next payment date appears in the invoice list under the "partially paid" status, in the invoice View dialog, and on the downloaded PDF beside Balance Due. It clears automatically once the invoice is fully paid.',
+          },
+          {
+            question: 'How do I mark an invoice as paid?',
+            answer:
+              'Click "Mark Paid" on the invoice row to settle the full remaining amount, or record the final payment from the Payments page — the status updates to "paid" automatically once the total is covered.',
+          },
+          {
+            question: 'Why did my stock go down when I created an invoice?',
+            answer:
+              'Stock is committed at invoice time, not at payment time. Deleting or cancelling the invoice returns the quantities to inventory.',
           },
           {
             question: 'How do I change a user’s role?',
@@ -200,11 +244,6 @@ export const helpTopics = [
             question: 'Can I export reports?',
             answer:
               'CSV export is planned. For now, reports can be screenshot or printed via your browser’s print dialog.',
-          },
-          {
-            question: 'How do I mark an invoice as paid?',
-            answer:
-              'Go to Payments, click Record Payment, pick the invoice, and enter the full amount. The invoice status updates automatically.',
           },
         ],
       },

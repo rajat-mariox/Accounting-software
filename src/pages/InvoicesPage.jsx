@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
-import { CloseIcon, TrashIcon } from '../components/dashboard/icons';
+import AlertBanner from '../components/dashboard/AlertBanner';
+import { CloseIcon, TrashIcon, WarningIcon, InvoiceAlertIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
+import { paymentModes } from '../data/payments';
 import { invoicesApi, clientsApi, inventoryApi } from '../api';
+import { can, getStoredUser } from '../utils/auth';
 import {
   isDueAfterCreated,
   isNonEmpty,
@@ -26,6 +30,9 @@ import {
   invoiceDetailCalendarIconSrc,
   invoiceDeleteTrashIconSrc,
 } from '../utils/images';
+import jgcHeaderSrc from '../utils/images/jgc-header.png?inline';
+import jgcFooterSrc from '../utils/images/jgc-footer.png?inline';
+import html2pdf from 'html2pdf.js';
 import '../styles/dashboard.css';
 import '../styles/invoices.css';
 import '../styles/form-errors.css';
@@ -33,6 +40,37 @@ import '../styles/form-errors.css';
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Mirrors Invoice.computeTotals on the backend: subtotal -> discount -> tax on discounted amount.
+function computeTotals(items, discountPercent, taxRate) {
+  const subtotal = round2(items.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0));
+  const discountAmount = round2(subtotal * (Number(discountPercent) || 0) / 100);
+  const taxable = round2(subtotal - discountAmount);
+  const taxAmount = round2(taxable * (Number(taxRate) || 0) / 100);
+  return { subtotal, discountAmount, taxable, taxAmount, total: round2(taxable + taxAmount) };
+}
+
+function isPercent(value) {
+  if (value === '' || value === undefined || value === null) return true;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100;
+}
+
+function invoiceBalance(invoice) {
+  if (!invoice) return 0;
+  if (typeof invoice.balance === 'number') return invoice.balance;
+  return Math.max(0, round2(Number(invoice.amount || 0) - Number(invoice.amountPaid || 0)));
+}
+
+const STATUS_LABEL = {
+  paid: 'paid',
+  partial: 'partially paid',
+  pending: 'pending',
+  overdue: 'overdue',
+  cancelled: 'cancelled',
+};
 
 function formatDate(value) {
   if (!value) return '';
@@ -50,18 +88,88 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-function buildInvoiceHtml(invoice) {
+const ONES_WORDS = [
+  '', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN',
+  'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN',
+];
+const TENS_WORDS = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY'];
+
+function numberToWords(value) {
+  const n = Math.floor(Math.abs(value));
+  if (n === 0) return 'ZERO';
+  const below1000 = (num) => {
+    let words = '';
+    if (num >= 100) {
+      words += `${ONES_WORDS[Math.floor(num / 100)]} HUNDRED`;
+      num %= 100;
+      if (num) words += ' ';
+    }
+    if (num >= 20) {
+      words += TENS_WORDS[Math.floor(num / 10)];
+      if (num % 10) words += `-${ONES_WORDS[num % 10]}`;
+    } else if (num > 0) {
+      words += ONES_WORDS[num];
+    }
+    return words;
+  };
+  const scales = [
+    [1000000000, 'BILLION'],
+    [1000000, 'MILLION'],
+    [1000, 'THOUSAND'],
+  ];
+  let remainder = n;
+  const parts = [];
+  for (const [scale, label] of scales) {
+    if (remainder >= scale) {
+      parts.push(`${below1000(Math.floor(remainder / scale))} ${label}`);
+      remainder %= scale;
+    }
+  }
+  if (remainder > 0) parts.push(below1000(remainder));
+  return parts.join(' ');
+}
+
+function amountInWords(amount) {
+  const total = Math.round((Number(amount) || 0) * 100);
+  const dollars = Math.floor(total / 100);
+  const cents = total % 100;
+  const dollarWords = `${numberToWords(dollars)} ${dollars === 1 ? 'DOLLAR' : 'DOLLARS'}`;
+  if (!cents) return `${dollarWords} ONLY`;
+  return `${dollarWords} AND ${numberToWords(cents)} ${cents === 1 ? 'CENT' : 'CENTS'} ONLY`;
+}
+
+function formatDocMoney(value) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
+
+function formatDocDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${date.getFullYear()}`;
+}
+
+function buildInvoiceHtml(invoice, client) {
   const number = invoice.invoiceNumber || invoice.id;
   const items = invoice.items || [];
   const rows = items
     .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.name)}</td>
-          <td style="text-align:center">${escapeHtml(item.quantity)}</td>
-          <td style="text-align:right">${formatInvoiceMoney(item.price)}</td>
-          <td style="text-align:right">${formatInvoiceMoney(item.price * item.quantity)}</td>
-        </tr>`,
+      (item, index) => `
+      <tr>
+        <td class="c">${index + 1}</td>
+        <td>${escapeHtml(item.name).toUpperCase()}</td>
+        <td class="r">${formatDocMoney(item.price)}</td>
+        <td class="c">${escapeHtml(item.unit || 'Pcs')}</td>
+        <td class="c">${escapeHtml(item.quantity)}</td>
+        <td class="r">${item.price * item.quantity ? formatDocMoney(item.price * item.quantity) : '$&nbsp;&nbsp;&nbsp;-'}</td>
+      </tr>`,
     )
     .join('');
 
@@ -71,96 +179,178 @@ function buildInvoiceHtml(invoice) {
 <meta charset="utf-8" />
 <title>Invoice ${escapeHtml(number)}</title>
 <style>
-  body { font-family: 'Inter', Arial, sans-serif; color: #1f2937; margin: 40px; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1d4ed8; padding-bottom: 16px; margin-bottom: 24px; }
-  .header h1 { margin: 0; color: #1d4ed8; font-size: 28px; }
-  .meta { margin-top: 8px; font-size: 14px; color: #4b5563; }
-  .meta div { margin-bottom: 4px; }
-  .panels { display: flex; gap: 32px; margin-bottom: 24px; }
-  .panel { flex: 1; }
-  .panel h3 { margin: 0 0 6px 0; font-size: 13px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.04em; }
-  .panel p { margin: 0; font-size: 15px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-  th { background: #f3f4f6; text-align: left; padding: 10px 12px; font-size: 13px; color: #374151; }
-  td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
-  .totals { display: flex; justify-content: flex-end; }
-  .totals-box { min-width: 240px; }
-  .totals-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 15px; }
-  .totals-row.grand { border-top: 2px solid #1f2937; margin-top: 4px; padding-top: 12px; font-size: 18px; font-weight: 600; }
-  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
-  .pill.paid { background: #dcfce7; color: #166534; }
-  .pill.pending { background: #fef9c3; color: #854d0e; }
-  .pill.overdue { background: #fee2e2; color: #b91c1c; }
-  @media print { body { margin: 20px; } }
+  * { box-sizing: border-box; }
+  body { font-family: 'Cambria', 'Georgia', 'Times New Roman', serif; color: #111; margin: 0; background: #fff; }
+  .page { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; min-height: 100vh; }
+  .banner { display: block; width: 100%; height: auto; }
+  .banner--header { margin-bottom: 26px; }
+  .content { padding: 0 32px; }
+  table.doc { width: 100%; border-collapse: collapse; }
+  table.doc td, table.doc th { border: 1.5px solid #111; padding: 6px 10px; font-size: 14px; vertical-align: top; }
+  .label { font-weight: 700; }
+  .u { text-decoration: underline; }
+  .red { color: #e02020; }
+  .title-cell { text-align: center; vertical-align: middle !important; font-size: 24px; font-weight: 700; }
+  .c { text-align: center; }
+  .r { text-align: right; }
+  table.items td, table.items th { vertical-align: middle; }
+  table.items th { background: #eee; text-align: center; font-size: 13px; }
+  table.items th.desc { font-style: italic; color: #4472c4; font-weight: 600; font-size: 16px; }
+  .total-row td { font-size: 17px; font-weight: 700; }
+  .words-row td { padding: 16px 12px; text-align: center; font-weight: 700; }
+  .footer { margin-top: auto; padding-top: 26px; }
+  @media print { .page { min-height: auto; } body { margin: 0; } }
 </style>
 </head>
 <body>
-  <div class="header">
-    <div>
-      <h1>INVOICE</h1>
-      <div class="meta">
-        <div><strong>Invoice #:</strong> ${escapeHtml(number)}</div>
-        <div><strong>Status:</strong> <span class="pill ${escapeHtml(invoice.status)}">${escapeHtml(invoice.status)}</span></div>
-      </div>
-    </div>
-    <div style="text-align:right">
-      <div style="font-size:18px; font-weight:600; color:#1d4ed8;">Jubba group</div>
-      <div class="meta">ERP System</div>
-    </div>
-  </div>
+<div class="page">
+  <img class="banner banner--header" src="${jgcHeaderSrc}" alt="Jubba Group of Companies" />
 
-  <div class="panels">
-    <div class="panel">
-      <h3>Bill To</h3>
-      <p>${escapeHtml(invoice.clientName || '')}</p>
-    </div>
-    <div class="panel">
-      <h3>Created</h3>
-      <p>${escapeHtml(formatDate(invoice.createdDate))}</p>
-    </div>
-    <div class="panel">
-      <h3>Due Date</h3>
-      <p>${escapeHtml(formatDate(invoice.dueDate))}</p>
-    </div>
-  </div>
+  <div class="content">
+  <table class="doc">
+    <tr>
+      <td class="label u" style="width:52%">ISSUER</td>
+      <td class="title-cell red" colspan="2" rowspan="2">COMMERCIAL INVOICE</td>
+    </tr>
+    <tr>
+      <td>
+        <div class="label u">JUBBA GROUP OF COMPANIES</div>
+        <div>814 MAKKA MUKARAMA STREET WABERI DISTRICT MOGADISHU SOMALIA</div>
+      </td>
+    </tr>
+    <tr>
+      <td class="label">TO: ${escapeHtml((invoice.clientName || '').toUpperCase())}</td>
+      <td class="label" style="width:23%">INVOICE NO.</td>
+      <td class="c" style="width:25%">${escapeHtml(number)}</td>
+    </tr>
+    <tr>
+      <td class="label u">${escapeHtml((invoice.clientName || '').toUpperCase())}</td>
+      <td class="label">DATE OF ISSUE</td>
+      <td class="c">${escapeHtml(formatDocDate(invoice.createdDate))}</td>
+    </tr>
+    <tr>
+      <td>${escapeHtml(client?.address || '')}</td>
+      <td class="label">DUE DATE</td>
+      <td class="c">${escapeHtml(formatDocDate(invoice.dueDate))}</td>
+    </tr>
+    <tr>
+      <td class="label" colspan="1">STATUS</td>
+      <td colspan="2" style="text-transform:uppercase">${escapeHtml(invoice.status || '')}</td>
+    </tr>
+    ${invoice.notes ? `<tr><td class="label">NOTES</td><td colspan="2">${escapeHtml(invoice.notes)}</td></tr>` : ''}
+  </table>
 
-  <table>
+  <table class="doc items" style="margin-top:-1.5px">
     <thead>
       <tr>
-        <th>Item</th>
-        <th style="text-align:center">Qty</th>
-        <th style="text-align:right">Price</th>
-        <th style="text-align:right">Total</th>
+        <th style="width:7%">ITEM</th>
+        <th class="desc">Description</th>
+        <th style="width:12%">UNIT<br/>PRICE</th>
+        <th style="width:12%">UNIT</th>
+        <th style="width:9%">QTY</th>
+        <th style="width:16%">AMOUNT</th>
       </tr>
     </thead>
     <tbody>
-      ${rows || '<tr><td colspan="4" style="text-align:center; color:#6b7280">No items</td></tr>'}
+      ${rows || '<tr><td colspan="6" class="c">No items</td></tr>'}
+      ${Number(invoice.discountAmount) > 0 || Number(invoice.taxAmount) > 0 ? `
+      <tr>
+        <td colspan="3"></td>
+        <td class="c">SUBTOTAL</td>
+        <td class="c">USD</td>
+        <td class="r">${formatDocMoney(invoice.subtotal ?? invoice.amount)}</td>
+      </tr>` : ''}
+      ${Number(invoice.discountAmount) > 0 ? `
+      <tr>
+        <td colspan="3"></td>
+        <td class="c">DISCOUNT ${escapeHtml(String(invoice.discountPercent || 0))}%</td>
+        <td class="c">USD</td>
+        <td class="r">-${formatDocMoney(invoice.discountAmount)}</td>
+      </tr>` : ''}
+      ${Number(invoice.taxAmount) > 0 ? `
+      <tr>
+        <td colspan="3"></td>
+        <td class="c">TAX ${escapeHtml(String(invoice.taxRate || 0))}%</td>
+        <td class="c">USD</td>
+        <td class="r">${formatDocMoney(invoice.taxAmount)}</td>
+      </tr>` : ''}
+      <tr class="total-row">
+        <td colspan="3"></td>
+        <td class="c red">TOTAL</td>
+        <td class="c red">USD</td>
+        <td class="r red">${formatDocMoney(invoice.amount)}</td>
+      </tr>
+      ${Number(invoice.amountPaid) > 0 && Number(invoice.amountPaid) < Number(invoice.amount) ? `
+      <tr>
+        <td colspan="3"></td>
+        <td class="c">PAID</td>
+        <td class="c">USD</td>
+        <td class="r">${formatDocMoney(invoice.amountPaid)}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="3"></td>
+        <td class="c red">BALANCE DUE</td>
+        <td class="c red">USD</td>
+        <td class="r red">${formatDocMoney(Number(invoice.amount) - Number(invoice.amountPaid))}</td>
+      </tr>
+      ${invoice.nextPaymentDate ? `
+      <tr>
+        <td colspan="3"></td>
+        <td class="c">NEXT PAYMENT</td>
+        <td colspan="2" class="c">${escapeHtml(formatDocDate(invoice.nextPaymentDate))}</td>
+      </tr>` : ''}` : ''}
+      <tr class="words-row">
+        <td colspan="2" class="red">AMOUNT IN<br/>WORDS</td>
+        <td colspan="4" class="red">${escapeHtml(amountInWords(invoice.amount))}</td>
+      </tr>
     </tbody>
   </table>
-
-  <div class="totals">
-    <div class="totals-box">
-      <div class="totals-row grand">
-        <span>Total</span>
-        <span>${formatInvoiceMoney(invoice.amount)}</span>
-      </div>
-    </div>
   </div>
+
+  <div class="footer">
+    <img class="banner" src="${jgcFooterSrc}" alt="Contact: 0619998770 / 0616111139, Info@jubbagroup.so, Mogadishu Somalia" />
+  </div>
+</div>
 </body>
 </html>`;
 }
 
-function downloadInvoice(invoice) {
-  const html = buildInvoiceHtml(invoice);
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${invoice.invoiceNumber || invoice.id}.html`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+async function downloadInvoice(invoice, client) {
+  const html = buildInvoiceHtml(invoice, client);
+  // Render the invoice in a hidden iframe so its styles cannot clash with the app,
+  // then convert that document to a real PDF.
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-10000px';
+  iframe.style.top = '0';
+  iframe.style.width = '820px';
+  iframe.style.height = '1160px';
+  document.body.appendChild(iframe);
+  try {
+    const doc = iframe.contentDocument;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    await new Promise((resolve) => {
+      if (doc.readyState === 'complete') {
+        setTimeout(resolve, 150);
+      } else {
+        iframe.onload = () => setTimeout(resolve, 150);
+      }
+    });
+    await html2pdf()
+      .set({
+        margin: 0,
+        filename: `${invoice.invoiceNumber || invoice.id}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, windowWidth: 820 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      })
+      .from(doc.body)
+      .save();
+  } finally {
+    document.body.removeChild(iframe);
+  }
 }
 
 function validateInvoiceForm(form, draftItems) {
@@ -177,10 +367,29 @@ function validateInvoiceForm(form, draftItems) {
   if (!draftItems.length) {
     errors.items = 'Add at least one item to the invoice.';
   }
+  if (!isPercent(form.discountPercent)) errors.discountPercent = 'Discount must be between 0 and 100.';
+  if (!isPercent(form.taxRate)) errors.taxRate = 'Tax rate must be between 0 and 100.';
+  if (form.payNow) {
+    const total = computeTotals(draftItems, form.discountPercent, form.taxRate).total;
+    const paid = Number(form.amountPaidNow);
+    if (!isNonEmpty(form.amountPaidNow) || !Number.isFinite(paid) || paid <= 0) {
+      errors.amountPaidNow = 'Enter the amount the client is paying now.';
+    } else if (paid > total) {
+      errors.amountPaidNow = `Amount cannot exceed the invoice total of ${formatInvoiceMoney(total)}.`;
+    }
+  }
+  if (isNonEmpty(form.nextPaymentDate)) {
+    if (!isValidISODate(form.nextPaymentDate)) {
+      errors.nextPaymentDate = 'Use the YYYY-MM-DD format.';
+    } else if (isValidISODate(form.createdDate) && !isDueAfterCreated(form.createdDate, form.nextPaymentDate)) {
+      errors.nextPaymentDate = 'Next payment date must be on or after created date.';
+    }
+  }
   return errors;
 }
 
 export default function InvoicesPage({ initialAction }) {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
   const [clients, setClients] = useState([]);
   const [catalog, setCatalog] = useState([]);
@@ -191,7 +400,7 @@ export default function InvoicesPage({ initialAction }) {
   const [isModalOpen, setIsModalOpen] = useState(initialAction === 'add');
   const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'create' : null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [createForm, setCreateForm] = useState({ clientId: '', createdDate: todayISO(), dueDate: '', itemId: '', quantity: '1' });
+  const [createForm, setCreateForm] = useState({ clientId: '', createdDate: todayISO(), dueDate: '', itemId: '', quantity: '1', discountPercent: '0', taxRate: '0', payNow: false, amountPaidNow: '', paymentMode: paymentModes[0], nextPaymentDate: '' });
   const [draftItems, setDraftItems] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [createErrors, setCreateErrors] = useState({});
@@ -201,7 +410,12 @@ export default function InvoicesPage({ initialAction }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([invoicesApi.list(), clientsApi.list(), inventoryApi.list()])
+    const canCreate = can('invoices', 'create');
+    Promise.all([
+      invoicesApi.list(),
+      canCreate ? clientsApi.list() : Promise.resolve([]),
+      canCreate ? inventoryApi.list() : Promise.resolve([]),
+    ])
       .then(([invoiceRows, clientRows, itemRows]) => {
         if (cancelled) return;
         setInvoices(invoiceRows);
@@ -237,20 +451,72 @@ export default function InvoicesPage({ initialAction }) {
     ];
   }, [invoices]);
 
-  const draftSubtotal = useMemo(
-    () => draftItems.reduce((sum, item) => sum + item.quantity * item.price, 0),
-    [draftItems],
+  const draftTotals = useMemo(
+    () => computeTotals(draftItems, createForm.discountPercent, createForm.taxRate),
+    [draftItems, createForm.discountPercent, createForm.taxRate],
   );
+
+  // Client-portal reminders: unpaid balances that are overdue or due within 3 days.
+  // Staff get the equivalent on the dashboard; clients land here, so show it here.
+  const isClientUser = getStoredUser()?.role === 'Client';
+  const [dismissedReminders, setDismissedReminders] = useState(() => new Set());
+  const reminders = useMemo(() => {
+    if (!isClientUser) return [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const soon = new Date(today.getTime() + 4 * 24 * 60 * 60 * 1000);
+    const open = invoices.filter((inv) => !['paid', 'cancelled'].includes(inv.status) && invoiceBalance(inv) > 0);
+    const overdue = open.filter((inv) => new Date(inv.dueDate) < today);
+    const dueSoon = open.filter((inv) => {
+      const due = new Date(inv.dueDate);
+      return due >= today && due < soon;
+    });
+    const sum = (rows) => rows.reduce((total, inv) => total + invoiceBalance(inv), 0);
+    const out = [];
+    if (overdue.length > 0 && !dismissedReminders.has('overdue')) {
+      out.push({
+        id: 'overdue',
+        variant: 'danger',
+        icon: InvoiceAlertIcon,
+        title: overdue.length === 1 ? 'Invoice Overdue' : `${overdue.length} Invoices Overdue`,
+        description: `${formatInvoiceMoney(sum(overdue))} is past its due date (${overdue.map((inv) => inv.invoiceNumber).join(', ')}). Please arrange payment.`,
+        cta: 'View Payments',
+        path: '/payments',
+      });
+    }
+    if (dueSoon.length > 0 && !dismissedReminders.has('due')) {
+      const dueToday = dueSoon.filter((inv) => new Date(inv.dueDate) < new Date(today.getTime() + 24 * 60 * 60 * 1000));
+      out.push({
+        id: 'due',
+        variant: 'warning',
+        icon: WarningIcon,
+        title: dueToday.length > 0 ? 'Payment Due Today' : 'Payment Due Soon',
+        description: `${formatInvoiceMoney(sum(dueSoon))} is due within the next 3 days (${dueSoon
+          .map((inv) => `${inv.invoiceNumber} on ${formatDate(inv.dueDate)}`)
+          .join(', ')}).`,
+        cta: 'View Payments',
+        path: '/payments',
+      });
+    }
+    return out;
+  }, [invoices, isClientUser, dismissedReminders]);
 
   function openCreateModal() {
     setModalMode('create');
     setSelectedInvoice(null);
+    const firstClient = clients[0];
     setCreateForm({
-      clientId: clients[0]?.id ?? '',
+      clientId: firstClient?.id ?? '',
       createdDate: todayISO(),
       dueDate: '',
       itemId: catalog[0]?.id ?? '',
       quantity: '1',
+      discountPercent: String(firstClient?.discountPercent ?? 0),
+      taxRate: String(firstClient?.taxRate ?? 0),
+      payNow: false,
+      amountPaidNow: '',
+      paymentMode: paymentModes[0],
+      nextPaymentDate: '',
     });
     setDraftItems([]);
     setCreateErrors({});
@@ -290,13 +556,25 @@ export default function InvoicesPage({ initialAction }) {
     }
     setSubmitting(true);
     try {
+      const paidNow = createForm.payNow ? round2(createForm.amountPaidNow) : 0;
       const created = await invoicesApi.create({
         client: createForm.clientId,
         createdDate: createForm.createdDate,
         dueDate: createForm.dueDate,
-        items: draftItems.map((item) => ({ name: item.name, quantity: item.quantity, price: item.price })),
+        discountPercent: Number(createForm.discountPercent) || 0,
+        taxRate: Number(createForm.taxRate) || 0,
+        items: draftItems.map((item) => ({ item: item.itemId, name: item.name, quantity: item.quantity, price: item.price })),
+        ...(paidNow > 0 ? { initialPayment: { amount: paidNow, mode: createForm.paymentMode } } : {}),
+        ...(createForm.nextPaymentDate && paidNow < draftTotals.total ? { nextPaymentDate: createForm.nextPaymentDate } : {}),
       });
-      setInvoices((current) => [created, ...current]);
+      const { updatedItems, ...invoice } = created;
+      setInvoices((current) => [invoice, ...current]);
+      // Reflect the reduced stock in the catalog dropdown without a reload.
+      if (Array.isArray(updatedItems) && updatedItems.length > 0) {
+        setCatalog((current) =>
+          current.map((entry) => updatedItems.find((u) => u.id === entry.id) || entry),
+        );
+      }
       closeModal();
     } catch (err) {
       setCreateErrors({ form: err.message || 'Could not create invoice' });
@@ -329,12 +607,24 @@ export default function InvoicesPage({ initialAction }) {
   }
 
   function handleCreateFieldChange(event) {
-    const { name, value } = event.target;
-    setCreateForm((current) => ({ ...current, [name]: value }));
+    const { name, type, checked } = event.target;
+    const value = type === 'checkbox' ? checked : event.target.value;
+    setCreateForm((current) => {
+      const next = { ...current, [name]: value };
+      // Switching client pulls in that client's default discount and tax rate.
+      if (name === 'clientId') {
+        const client = clients.find((c) => c.id === value);
+        next.discountPercent = String(client?.discountPercent ?? 0);
+        next.taxRate = String(client?.taxRate ?? 0);
+      }
+      return next;
+    });
     setCreateErrors((current) => {
-      if (!current[name]) return current;
+      if (!current[name] && !(name === 'payNow' && current.amountPaidNow)) return current;
       const next = { ...current };
       delete next[name];
+      // Unchecking "pay now" removes the amount field, so its error goes with it.
+      if (name === 'payNow' && !value) delete next.amountPaidNow;
       return next;
     });
   }
@@ -350,10 +640,24 @@ export default function InvoicesPage({ initialAction }) {
       return;
     }
     const quantity = Number(createForm.quantity);
+    // Can't invoice more than is in stock (counting what's already on this draft).
+    const alreadyDrafted = draftItems
+      .filter((line) => line.itemId === item.id)
+      .reduce((sum, line) => sum + line.quantity, 0);
+    const available = Number(item.stock) || 0;
+    if (alreadyDrafted + quantity > available) {
+      setAddItemError(
+        available - alreadyDrafted > 0
+          ? `Only ${available - alreadyDrafted} of ${item.name} available in stock.`
+          : `${item.name} is out of stock.`,
+      );
+      return;
+    }
     setDraftItems((current) => [
       ...current,
       {
         id: `${item.id}-${Date.now()}`,
+        itemId: item.id,
         name: item.name,
         quantity,
         price: item.price,
@@ -410,11 +714,30 @@ export default function InvoicesPage({ initialAction }) {
               <p>Manage your invoices and billing</p>
             </div>
 
+            {can('invoices', 'create') ? (
             <button type="button" className="invoice-create-button" onClick={openCreateModal}>
               <img src={invoicePlusIconSrc} alt="" aria-hidden="true" className="invoice-create-button__icon" />
               Create Invoice
             </button>
+            ) : null}
           </div>
+
+          {reminders.length > 0 ? (
+            <div className="dashboard-alerts">
+              {reminders.map((reminder) => (
+                <AlertBanner
+                  key={reminder.id}
+                  variant={reminder.variant}
+                  icon={reminder.icon}
+                  title={reminder.title}
+                  description={reminder.description}
+                  cta={reminder.cta}
+                  onClick={() => navigate(reminder.path)}
+                  onDismiss={() => setDismissedReminders((prev) => new Set(prev).add(reminder.id))}
+                />
+              ))}
+            </div>
+          ) : null}
 
           <section className="invoice-stats">
             {stats.map((stat) => (
@@ -476,20 +799,28 @@ export default function InvoicesPage({ initialAction }) {
                         <td>{formatDate(invoice.dueDate)}</td>
                         <td className="invoice-amount">{formatInvoiceMoney(invoice.amount)}</td>
                         <td>
-                          <span className={`invoice-pill invoice-pill--${invoice.status}`}>{invoice.status}</span>
+                          <span className={`invoice-pill invoice-pill--${invoice.status}`}>{STATUS_LABEL[invoice.status] || invoice.status}</span>
+                          {invoice.status === 'partial' ? (
+                            <span className="invoice-balance-note">
+                              {formatInvoiceMoney(invoiceBalance(invoice))} due
+                              {invoice.nextPaymentDate ? ` · next: ${formatDate(invoice.nextPaymentDate)}` : ''}
+                            </span>
+                          ) : null}
                         </td>
                         <td>
                           <div className="invoice-actions">
                             {invoice.status !== 'paid' ? (
-                              <button type="button" className="invoice-view-button" onClick={() => markPaid(invoice)}>
-                                Mark Paid
-                              </button>
+                              can('invoices', 'edit') ? (
+                                <button type="button" className="invoice-view-button" onClick={() => markPaid(invoice)}>
+                                  Mark Paid
+                                </button>
+                              ) : null
                             ) : (
                               <button
                                 type="button"
                                 className="invoice-icon-action"
                                 aria-label={`Download ${invoice.invoiceNumber || invoice.id}`}
-                                onClick={() => downloadInvoice(invoice)}
+                                onClick={() => downloadInvoice(invoice, clients.find((c) => c.id === invoice.client))}
                               >
                                 <img src={invoiceDownloadIconSrc} alt="" aria-hidden="true" />
                               </button>
@@ -497,9 +828,11 @@ export default function InvoicesPage({ initialAction }) {
                             <button type="button" className="invoice-view-button" onClick={() => openViewModal(invoice)}>
                               View
                             </button>
-                            <button type="button" className="invoice-delete-button" onClick={() => openDeleteModal(invoice)}>
-                              Delete
-                            </button>
+                            {can('invoices', 'delete') ? (
+                              <button type="button" className="invoice-delete-button" onClick={() => openDeleteModal(invoice)}>
+                                Delete
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -668,11 +1001,72 @@ export default function InvoicesPage({ initialAction }) {
                       </tbody>
                     </table>
 
+                    <div className="invoice-pricing">
+                      <label className="invoice-field">
+                        <span>Discount (%)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          name="discountPercent"
+                          value={createForm.discountPercent}
+                          onChange={handleCreateFieldChange}
+                          aria-invalid={Boolean(createErrors.discountPercent)}
+                          className={createErrors.discountPercent ? 'field-input--invalid' : ''}
+                        />
+                        {createErrors.discountPercent ? <span className="field-error">{createErrors.discountPercent}</span> : null}
+                      </label>
+                      <label className="invoice-field">
+                        <span>Tax (%)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          name="taxRate"
+                          value={createForm.taxRate}
+                          onChange={handleCreateFieldChange}
+                          aria-invalid={Boolean(createErrors.taxRate)}
+                          className={createErrors.taxRate ? 'field-input--invalid' : ''}
+                        />
+                        {createErrors.taxRate ? <span className="field-error">{createErrors.taxRate}</span> : null}
+                      </label>
+                    </div>
+
                     <div className="invoice-totals">
+                      <div className="invoice-totals__row">
+                        <span>Subtotal</span>
+                        <span>{formatInvoiceMoney(draftTotals.subtotal)}</span>
+                      </div>
+                      {draftTotals.discountAmount > 0 ? (
+                        <div className="invoice-totals__row">
+                          <span>Discount ({Number(createForm.discountPercent) || 0}%)</span>
+                          <span>-{formatInvoiceMoney(draftTotals.discountAmount)}</span>
+                        </div>
+                      ) : null}
+                      {draftTotals.taxAmount > 0 ? (
+                        <div className="invoice-totals__row">
+                          <span>Tax ({Number(createForm.taxRate) || 0}% on {formatInvoiceMoney(draftTotals.taxable)})</span>
+                          <span>{formatInvoiceMoney(draftTotals.taxAmount)}</span>
+                        </div>
+                      ) : null}
                       <div className="invoice-totals__total">
                         <span>Total:</span>
-                        <strong>{formatInvoiceMoney(draftSubtotal)}</strong>
+                        <strong>{formatInvoiceMoney(draftTotals.total)}</strong>
                       </div>
+                      {createForm.payNow && Number(createForm.amountPaidNow) > 0 ? (
+                        <>
+                          <div className="invoice-totals__row">
+                            <span>Paying Now</span>
+                            <span>-{formatInvoiceMoney(Number(createForm.amountPaidNow))}</span>
+                          </div>
+                          <div className="invoice-totals__total">
+                            <span>Balance Due:</span>
+                            <strong>{formatInvoiceMoney(Math.max(0, round2(draftTotals.total - Number(createForm.amountPaidNow))))}</strong>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -681,6 +1075,78 @@ export default function InvoicesPage({ initialAction }) {
                     <p>Add items to this invoice</p>
                   </div>
                 )}
+
+                <div className="invoice-create__section-title invoice-payment-title">Payment</div>
+
+                <label className="invoice-paynow-check">
+                  <input
+                    type="checkbox"
+                    name="payNow"
+                    checked={createForm.payNow}
+                    onChange={handleCreateFieldChange}
+                  />
+                  <span>Client is paying an amount now</span>
+                </label>
+
+                {createForm.payNow ? (
+                  <div className="invoice-pricing">
+                    <label className="invoice-field">
+                      <span>Amount Received ($)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        name="amountPaidNow"
+                        value={createForm.amountPaidNow}
+                        onChange={handleCreateFieldChange}
+                        placeholder="0.00"
+                        aria-invalid={Boolean(createErrors.amountPaidNow)}
+                        className={createErrors.amountPaidNow ? 'field-input--invalid' : ''}
+                      />
+                      {createErrors.amountPaidNow ? <span className="field-error">{createErrors.amountPaidNow}</span> : null}
+                    </label>
+                    <label className="invoice-field">
+                      <span>Payment Mode</span>
+                      <div className="invoice-select">
+                        <select name="paymentMode" value={createForm.paymentMode} onChange={handleCreateFieldChange}>
+                          {paymentModes.map((mode) => (
+                            <option key={mode} value={mode}>
+                              {mode}
+                            </option>
+                          ))}
+                        </select>
+                        <img
+                          src={invoiceModalChevronIconSrc}
+                          alt=""
+                          aria-hidden="true"
+                          className="invoice-select__chevron"
+                        />
+                      </div>
+                    </label>
+                  </div>
+                ) : null}
+
+                {!createForm.payNow || round2(createForm.amountPaidNow) < draftTotals.total ? (
+                  <div className="invoice-pricing">
+                    <label className="invoice-field">
+                      <span>Next Payment Date{createForm.payNow ? ' (for the balance)' : ''}</span>
+                      <input
+                        type="date"
+                        name="nextPaymentDate"
+                        value={createForm.nextPaymentDate}
+                        onChange={handleCreateFieldChange}
+                        placeholder="YYYY-MM-DD"
+                        aria-invalid={Boolean(createErrors.nextPaymentDate)}
+                        className={createErrors.nextPaymentDate ? 'field-input--invalid' : ''}
+                      />
+                      {createErrors.nextPaymentDate ? (
+                        <span className="field-error">{createErrors.nextPaymentDate}</span>
+                      ) : (
+                        <span className="invoice-field__hint">Optional — when the client will pay{createForm.payNow ? ' the rest' : ''}.</span>
+                      )}
+                    </label>
+                  </div>
+                ) : null}
 
                 {createErrors.form ? <span className="field-error">{createErrors.form}</span> : null}
 
@@ -714,7 +1180,7 @@ export default function InvoicesPage({ initialAction }) {
                     <span>Status</span>
                     <div className="invoice-detail__value">
                       <span className={`invoice-pill invoice-pill--${selectedInvoice.status}`}>
-                        {selectedInvoice.status}
+                        {STATUS_LABEL[selectedInvoice.status] || selectedInvoice.status}
                       </span>
                     </div>
                   </div>
@@ -732,6 +1198,15 @@ export default function InvoicesPage({ initialAction }) {
                       {formatDate(selectedInvoice.dueDate)}
                     </div>
                   </div>
+                  {selectedInvoice.nextPaymentDate ? (
+                    <div className="invoice-detail__field">
+                      <span>Next Payment Date</span>
+                      <div className="invoice-detail__value">
+                        <img src={invoiceDetailCalendarIconSrc} alt="" aria-hidden="true" />
+                        {formatDate(selectedInvoice.nextPaymentDate)}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="invoice-detail__items-section">
@@ -752,10 +1227,40 @@ export default function InvoicesPage({ initialAction }) {
                 </div>
 
                 <div className="invoice-detail__totals">
+                  {(Number(selectedInvoice.discountAmount) > 0 || Number(selectedInvoice.taxAmount) > 0) ? (
+                    <div className="invoice-totals__row">
+                      <span>Subtotal</span>
+                      <span>{formatInvoiceMoney(selectedInvoice.subtotal ?? selectedInvoice.amount)}</span>
+                    </div>
+                  ) : null}
+                  {Number(selectedInvoice.discountAmount) > 0 ? (
+                    <div className="invoice-totals__row">
+                      <span>Discount ({selectedInvoice.discountPercent}%)</span>
+                      <span>-{formatInvoiceMoney(selectedInvoice.discountAmount)}</span>
+                    </div>
+                  ) : null}
+                  {Number(selectedInvoice.taxAmount) > 0 ? (
+                    <div className="invoice-totals__row">
+                      <span>Tax ({selectedInvoice.taxRate}%)</span>
+                      <span>{formatInvoiceMoney(selectedInvoice.taxAmount)}</span>
+                    </div>
+                  ) : null}
                   <div className="invoice-detail__total">
                     <span>Total:</span>
                     <strong>{formatInvoiceMoney(selectedInvoice.amount)}</strong>
                   </div>
+                  {Number(selectedInvoice.amountPaid) > 0 ? (
+                    <>
+                      <div className="invoice-totals__row">
+                        <span>Paid</span>
+                        <span>{formatInvoiceMoney(selectedInvoice.amountPaid)}</span>
+                      </div>
+                      <div className="invoice-detail__total invoice-detail__total--balance">
+                        <span>Balance Due:</span>
+                        <strong>{formatInvoiceMoney(invoiceBalance(selectedInvoice))}</strong>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
             ) : null}

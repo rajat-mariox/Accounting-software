@@ -15,6 +15,7 @@ import {
   UserOutlineIcon,
 } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
+import { can } from '../utils/auth';
 import { clientsApi } from '../api';
 import { formatCurrency } from '../utils/formatters';
 import { isNonEmpty, isValidEmail, isValidPhone, sanitizePhoneInput } from '../utils/validators';
@@ -26,13 +27,31 @@ import '../styles/form-errors.css';
 const emptyForm = {
   name: '',
   email: '',
+  password: '',
   phone: '',
   company: '',
   address: '',
+  discountPercent: '0',
+  taxRate: '0',
 };
 
-function validateClientForm(form) {
+const MIN_PASSWORD = 6;
+
+function isPercent(value) {
+  if (value === '' || value === undefined || value === null) return true;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100;
+}
+
+function validateClientForm(form, mode = 'add') {
   const errors = {};
+  // The password creates the client's portal login. Required on add; on edit it
+  // is optional and only resets the login when filled in.
+  if (mode === 'add' && !isNonEmpty(form.password)) {
+    errors.password = 'Login password is required.';
+  } else if (isNonEmpty(form.password) && form.password.length < MIN_PASSWORD) {
+    errors.password = `Password must be at least ${MIN_PASSWORD} characters.`;
+  }
   if (!isNonEmpty(form.name)) {
     errors.name = 'Name is required.';
   }
@@ -52,6 +71,8 @@ function validateClientForm(form) {
   if (!isNonEmpty(form.address)) {
     errors.address = 'Address is required.';
   }
+  if (!isPercent(form.discountPercent)) errors.discountPercent = 'Discount must be between 0 and 100.';
+  if (!isPercent(form.taxRate)) errors.taxRate = 'Tax rate must be between 0 and 100.';
   return errors;
 }
 
@@ -132,9 +153,12 @@ export default function ClientsPage({ initialAction }) {
     setForm({
       name: client.name || '',
       email: client.email || '',
+      password: '',
       phone: sanitizePhoneInput(client.phone || ''),
       company: client.company || '',
       address: client.address || '',
+      discountPercent: String(client.discountPercent ?? 0),
+      taxRate: String(client.taxRate ?? 0),
     });
     setErrors({});
     setModalMode('edit');
@@ -168,7 +192,7 @@ export default function ClientsPage({ initialAction }) {
 
   async function handleAddSubmit(event) {
     event.preventDefault();
-    const validationErrors = validateClientForm(form);
+    const validationErrors = validateClientForm(form, 'add');
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
@@ -190,14 +214,16 @@ export default function ClientsPage({ initialAction }) {
 
   async function handleEditSubmit(event) {
     event.preventDefault();
-    const validationErrors = validateClientForm(form);
+    const validationErrors = validateClientForm(form, 'edit');
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
     setSubmitting(true);
     try {
-      const updated = await clientsApi.update(selectedClient.id, form);
+      const { password, ...rest } = form;
+      const payload = password ? { ...rest, password } : rest;
+      const updated = await clientsApi.update(selectedClient.id, payload);
       setClients((current) => current.map((c) => (c.id === updated.id ? updated : c)));
       setSelectedClient(updated);
       setModalMode(null);
@@ -259,10 +285,12 @@ export default function ClientsPage({ initialAction }) {
               <p>Manage your client relationships</p>
             </div>
 
+            {can('clients', 'create') ? (
             <button className="clients-add-button" type="button" onClick={openAddModal}>
               <PlusIcon />
               Add Client
             </button>
+            ) : null}
           </div>
 
           <section className="card clients-card">
@@ -329,14 +357,16 @@ export default function ClientsPage({ initialAction }) {
                             >
                               <EditIcon />
                             </button>
-                            <button
-                              type="button"
-                              className="icon-action icon-action--delete"
-                              aria-label={`Delete ${row.name}`}
-                              onClick={() => openDeleteModal(row)}
-                            >
-                              <TrashIcon />
-                            </button>
+                            {can('clients', 'delete') ? (
+                              <button
+                                type="button"
+                                className="icon-action icon-action--delete"
+                                aria-label={`Delete ${row.name}`}
+                                onClick={() => openDeleteModal(row)}
+                              >
+                                <TrashIcon />
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -369,6 +399,7 @@ export default function ClientsPage({ initialAction }) {
                 onCancel={closeModal}
                 onSubmit={handleEditSubmit}
                 submitLabel="Update Client"
+                mode="edit"
                 submitting={submitting}
               />
             </ClientModal>
@@ -380,10 +411,12 @@ export default function ClientsPage({ initialAction }) {
               title="Client Details"
               widthClass="client-modal--details"
               headerAction={
-                <button type="button" className="detail-edit-button" onClick={() => openEditModal(activeClient)}>
-                  <EditIcon />
-                  Edit
-                </button>
+                can('clients', 'edit') ? (
+                  <button type="button" className="detail-edit-button" onClick={() => openEditModal(activeClient)}>
+                    <EditIcon />
+                    Edit
+                  </button>
+                ) : null
               }
             >
               <ClientDetails client={activeClient} />
@@ -431,7 +464,7 @@ function ClientModal({ title, children, onBackdrop, widthClass = '', headerActio
   );
 }
 
-function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLabel = 'Add Client', submitting = false }) {
+function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLabel = 'Add Client', mode = 'add', submitting = false }) {
   return (
     <form className="client-form" onSubmit={onSubmit} noValidate>
       <label className="client-field">
@@ -460,6 +493,22 @@ function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLab
           className={errors.email ? 'field-input--invalid' : ''}
         />
         {errors.email ? <span className="field-error">{errors.email}</span> : null}
+      </label>
+
+      <label className="client-field">
+        <span>{mode === 'edit' ? 'New Login Password' : 'Login Password'}</span>
+        <input
+          name="password"
+          value={form.password}
+          onChange={onChange}
+          type="password"
+          autoComplete="new-password"
+          placeholder={mode === 'edit' ? 'Leave blank to keep current password' : 'Minimum 6 characters'}
+          aria-invalid={Boolean(errors.password)}
+          className={errors.password ? 'field-input--invalid' : ''}
+        />
+        {errors.password ? <span className="field-error">{errors.password}</span> : null}
+        <span className="field-hint">The client signs in to the portal with this email and password.</span>
       </label>
 
       <label className="client-field">
@@ -506,6 +555,43 @@ function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLab
         />
         {errors.address ? <span className="field-error">{errors.address}</span> : null}
       </label>
+
+      <div className="client-field-row">
+        <label className="client-field">
+          <span>Default Discount (%)</span>
+          <input
+            name="discountPercent"
+            value={form.discountPercent}
+            onChange={onChange}
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            placeholder="0"
+            aria-invalid={Boolean(errors.discountPercent)}
+            className={errors.discountPercent ? 'field-input--invalid' : ''}
+          />
+          {errors.discountPercent ? <span className="field-error">{errors.discountPercent}</span> : null}
+        </label>
+
+        <label className="client-field">
+          <span>Tax Rate (%)</span>
+          <input
+            name="taxRate"
+            value={form.taxRate}
+            onChange={onChange}
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            placeholder="0"
+            aria-invalid={Boolean(errors.taxRate)}
+            className={errors.taxRate ? 'field-input--invalid' : ''}
+          />
+          {errors.taxRate ? <span className="field-error">{errors.taxRate}</span> : null}
+        </label>
+      </div>
+      <span className="field-hint">Applied automatically to this client&apos;s new invoices; tax is charged on the discounted amount. Both can be changed per invoice.</span>
 
       {errors.form ? <span className="field-error">{errors.form}</span> : null}
 

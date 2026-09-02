@@ -1321,3 +1321,46 @@ body {
     padding: 10px 8px;
   }
 }
+
+/* Access denied screen (permission-guarded routes) */
+.access-denied {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f4f6fb;
+  padding: 24px;
+}
+
+.access-denied__card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 40px 44px;
+  max-width: 420px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.access-denied__card h1 {
+  margin: 0 0 10px;
+  font-size: 22px;
+  color: #111827;
+}
+
+.access-denied__card p {
+  margin: 0 0 20px;
+  color: #6b7280;
+  font-size: 14.5px;
+}
+
+.access-denied__link {
+  display: inline-block;
+  background: #1d4ed8;
+  color: #ffffff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 22px;
+  border-radius: 8px;
+}

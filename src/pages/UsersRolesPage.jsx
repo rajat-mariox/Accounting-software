@@ -9,6 +9,8 @@ import {
   ViewIcon,
 } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
+import { ACTIONS, PERMISSION_MODULES, ROLE_PRESETS, resolvePermissions } from '../data/permissions';
+import { can, getStoredUser } from '../utils/auth';
 import { usersApi } from '../api';
 import {
   isNonEmpty,
@@ -50,7 +52,13 @@ const emptyForm = {
   status: '',
 };
 
-const permissionsList = ['View Records', 'Basic Operations', 'Limited Access'];
+function clonePermissions(grid) {
+  const out = {};
+  for (const [module, actions] of Object.entries(grid || {})) {
+    if (Array.isArray(actions) && actions.length > 0) out[module] = [...actions];
+  }
+  return out;
+}
 
 function validateUserForm(form, mode, existingUsers, currentUserId) {
   const errors = {};
@@ -118,9 +126,11 @@ export default function UsersRolesPage() {
   const [modalMode, setModalMode] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [permissions, setPermissions] = useState({});
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const currentUser = getStoredUser();
 
   useEffect(() => {
     let cancelled = false;
@@ -148,6 +158,7 @@ export default function UsersRolesPage() {
 
   function openAddModal() {
     setForm(emptyForm);
+    setPermissions({});
     setErrors({});
     setSelectedUser(null);
     setShowPassword(false);
@@ -164,6 +175,7 @@ export default function UsersRolesPage() {
       role: user.role || '',
       status: capitalize(user.status || ''),
     });
+    setPermissions(clonePermissions(resolvePermissions(user)));
     setErrors({});
     setShowPassword(false);
     setModalMode('edit');
@@ -184,11 +196,34 @@ export default function UsersRolesPage() {
     const { name, value } = event.target;
     const nextValue = name === 'phone' ? sanitizePhoneInput(value) : value;
     setForm((current) => ({ ...current, [name]: nextValue }));
+    // Selecting a role applies its preset; the admin can then adjust the ticks.
+    if (name === 'role' && ROLE_PRESETS[value]) {
+      setPermissions(clonePermissions(ROLE_PRESETS[value]));
+    }
     setErrors((current) => {
       if (!current[name]) return current;
       const next = { ...current };
       delete next[name];
       return next;
+    });
+  }
+
+  function togglePermission(moduleKey, action) {
+    setPermissions((current) => {
+      const granted = current[moduleKey] || [];
+      let next;
+      if (granted.includes(action)) {
+        // Removing view removes everything for the module — the other actions
+        // are unusable without seeing the page.
+        next = action === 'view' ? [] : granted.filter((a) => a !== action);
+      } else {
+        // Granting any action also grants view for the same reason.
+        next = [...new Set([...granted, action, 'view'])];
+      }
+      const updated = { ...current };
+      if (next.length > 0) updated[moduleKey] = next;
+      else delete updated[moduleKey];
+      return updated;
     });
   }
 
@@ -207,6 +242,7 @@ export default function UsersRolesPage() {
         phone: form.phone,
         role: form.role,
         status: form.status.toLowerCase(),
+        permissions,
       };
       if (form.password) payload.password = form.password;
 
@@ -253,10 +289,12 @@ export default function UsersRolesPage() {
               <p>Manage user access and permissions</p>
             </div>
 
-            <button type="button" className="users-add-button" onClick={openAddModal}>
-              <img src={usersAddIconSrc} alt="" aria-hidden="true" />
-              Add User
-            </button>
+            {can('users', 'create') ? (
+              <button type="button" className="users-add-button" onClick={openAddModal}>
+                <img src={usersAddIconSrc} alt="" aria-hidden="true" />
+                Add User
+              </button>
+            ) : null}
           </div>
 
           <section className="users-stats">
@@ -332,22 +370,26 @@ export default function UsersRolesPage() {
                         </td>
                         <td>
                           <div className="users-actions">
-                            <button
-                              type="button"
-                              className="users-action-btn users-action-btn--edit"
-                              aria-label={`Edit ${user.name}`}
-                              onClick={() => openEditModal(user)}
-                            >
-                              <EditIcon />
-                            </button>
-                            <button
-                              type="button"
-                              className="users-action-btn users-action-btn--delete"
-                              aria-label={`Delete ${user.name}`}
-                              onClick={() => openDeleteModal(user)}
-                            >
-                              <TrashIcon />
-                            </button>
+                            {can('users', 'edit') ? (
+                              <button
+                                type="button"
+                                className="users-action-btn users-action-btn--edit"
+                                aria-label={`Edit ${user.name}`}
+                                onClick={() => openEditModal(user)}
+                              >
+                                <EditIcon />
+                              </button>
+                            ) : null}
+                            {can('users', 'delete') && user.id !== currentUser?.id ? (
+                              <button
+                                type="button"
+                                className="users-action-btn users-action-btn--delete"
+                                aria-label={`Delete ${user.name}`}
+                                onClick={() => openDeleteModal(user)}
+                              >
+                                <TrashIcon />
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -524,15 +566,53 @@ export default function UsersRolesPage() {
                   </div>
 
                   <div className="users-permissions">
-                    <strong>Role Permissions:</strong>
-                    <ul>
-                      {permissionsList.map((permission) => (
-                        <li key={permission}>
-                          <img src={usersModalBulletIconSrc} alt="" aria-hidden="true" />
-                          {permission}
-                        </li>
-                      ))}
-                    </ul>
+                    <strong>Permissions:</strong>
+                    {form.role === 'Administrator' ? (
+                      <p className="users-permissions__note">
+                        <img src={usersModalBulletIconSrc} alt="" aria-hidden="true" />
+                        Administrators always have full access to every module.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="users-permissions__hint">
+                          Ticks follow the selected role — adjust them for this user. Granting an
+                          action also grants View for that module.
+                        </p>
+                        <div className="users-permissions__grid-wrap">
+                          <table className="users-permissions__grid">
+                            <thead>
+                              <tr>
+                                <th>Module</th>
+                                {ACTIONS.map((action) => (
+                                  <th key={action}>{capitalize(action)}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {PERMISSION_MODULES.map((module) => (
+                                <tr key={module.key}>
+                                  <td>{module.label}</td>
+                                  {ACTIONS.map((action) => (
+                                    <td key={action}>
+                                      {module.actions.includes(action) ? (
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(permissions[module.key]?.includes(action))}
+                                          onChange={() => togglePermission(module.key, action)}
+                                          aria-label={`${module.label}: ${action}`}
+                                        />
+                                      ) : (
+                                        <span className="users-permissions__na">—</span>
+                                      )}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {errors.form ? <span className="field-error">{errors.form}</span> : null}

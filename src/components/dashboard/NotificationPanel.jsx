@@ -21,6 +21,8 @@ export default function NotificationPanel({
   unreadCount = 0,
   onItemClick,
   onMarkAllRead,
+  soundOn = true,
+  onToggleSound,
   onClose,
 }) {
   const handleClick = (note) => {
@@ -53,6 +55,26 @@ export default function NotificationPanel({
               }}
             >
               Mark all read
+            </button>
+          ) : null}
+          {typeof onToggleSound === 'function' ? (
+            <button
+              type="button"
+              onClick={onToggleSound}
+              aria-pressed={soundOn}
+              aria-label={soundOn ? 'Mute notification sound' : 'Unmute notification sound'}
+              title={soundOn ? 'Sound on' : 'Sound off'}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: 14,
+                lineHeight: 1,
+                cursor: 'pointer',
+                padding: 0,
+                opacity: soundOn ? 1 : 0.5,
+              }}
+            >
+              {soundOn ? '🔔' : '🔕'}
             </button>
           ) : null}
         </div>

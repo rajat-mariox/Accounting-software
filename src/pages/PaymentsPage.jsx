@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
 } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
+import { can } from '../utils/auth';
 import { paymentModes } from '../data/payments';
 import { paymentsApi, invoicesApi } from '../api';
 import { formatCurrency } from '../utils/formatters';
@@ -40,11 +41,23 @@ const defaultForm = {
   date: todayISO(),
 };
 
-function validatePaymentForm(form) {
+function invoiceBalance(invoice) {
+  if (!invoice) return 0;
+  if (typeof invoice.balance === 'number') return invoice.balance;
+  return Math.max(0, Number(invoice.amount || 0) - Number(invoice.amountPaid || 0));
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value || 0);
+}
+
+function validatePaymentForm(form, invoice) {
   const errors = {};
   if (!isNonEmpty(form.invoiceId)) errors.invoiceId = 'Select an invoice.';
   if (!isPositiveNumber(form.amount)) {
     errors.amount = 'Amount must be greater than 0.';
+  } else if (invoice && Number(form.amount) > invoiceBalance(invoice) + 0.005) {
+    errors.amount = `Cannot exceed the outstanding balance of ${formatMoney(invoiceBalance(invoice))}.`;
   }
   if (!isNonEmpty(form.mode)) errors.mode = 'Select a payment mode.';
   if (!isNonEmpty(form.reference)) {
@@ -119,9 +132,20 @@ export default function PaymentsPage({ initialAction }) {
     setErrors({});
   }
 
+  const openInvoices = invoices.filter((invoice) => invoice.status !== 'cancelled' && invoiceBalance(invoice) > 0);
+  const selectedInvoice = invoices.find((invoice) => invoice.id === form.invoiceId) || null;
+
   function handleChange(event) {
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    setForm((current) => {
+      const next = { ...current, [name]: value };
+      // Picking an invoice pre-fills the outstanding balance; user can lower it for a partial payment.
+      if (name === 'invoiceId') {
+        const invoice = invoices.find((row) => row.id === value);
+        next.amount = invoice ? String(invoiceBalance(invoice)) : '';
+      }
+      return next;
+    });
     setErrors((current) => {
       if (!current[name]) return current;
       const next = { ...current };
@@ -137,7 +161,7 @@ export default function PaymentsPage({ initialAction }) {
 
   async function handleSubmit(event) {
     event.preventDefault();
-    const validationErrors = validatePaymentForm(form);
+    const validationErrors = validatePaymentForm(form, selectedInvoice);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
@@ -182,6 +206,7 @@ export default function PaymentsPage({ initialAction }) {
               <p>Track and record payments</p>
             </div>
 
+            {can('payments', 'create') ? (
             <button type="button" className="payments-create-button" onClick={openModal}>
               <img
                 src={invoicePlusIconSrc}
@@ -191,6 +216,7 @@ export default function PaymentsPage({ initialAction }) {
               />
               Record Payment
             </button>
+            ) : null}
           </div>
 
           <section className="payments-stats">
@@ -263,9 +289,9 @@ export default function PaymentsPage({ initialAction }) {
                       className={errors.invoiceId ? 'field-input--invalid' : ''}
                     >
                       <option value="" disabled></option>
-                      {invoices.map((invoice) => (
+                      {openInvoices.map((invoice) => (
                         <option key={invoice.id} value={invoice.id}>
-                          {(invoice.invoiceNumber || invoice.id)} - {invoice.clientName}
+                          {(invoice.invoiceNumber || invoice.id)} - {invoice.clientName} · balance {formatMoney(invoiceBalance(invoice))}
                         </option>
                       ))}
                     </select>

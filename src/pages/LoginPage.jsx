@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import BrandLockup from '../components/BrandLockup';
 import AuthField from '../components/AuthField';
 import { authApi } from '../api';
-import { setStoredAuth } from '../utils/auth';
+import { homePathFor, setStoredAuth } from '../utils/auth';
 import { loginLockIconSrc, loginMailIconSrc } from '../utils/images';
 import { isNonEmpty, isValidEmail } from '../utils/validators';
 import '../styles/auth.css';
@@ -16,7 +16,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const redirectTo = location.state?.from ?? '/dashboard';
+  const requestedPath = location.state?.from;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -39,7 +39,7 @@ export default function LoginPage() {
     try {
       const { user, token } = await authApi.login(email.trim().toLowerCase(), password);
       setStoredAuth({ user, token });
-      navigate(redirectTo, { replace: true });
+      navigate(requestedPath ?? homePathFor(user), { replace: true });
     } catch (err) {
       setError(err.message || 'Sign-in failed. Please try again.');
     } finally {

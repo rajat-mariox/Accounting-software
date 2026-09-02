@@ -6,6 +6,7 @@ import AlertBanner from '../components/dashboard/AlertBanner';
 import QuickActions from '../components/dashboard/QuickActions';
 import StatCard from '../components/dashboard/StatCard';
 import { formatCurrency } from '../utils/formatters';
+import { can } from '../utils/auth';
 import {
   quickActions,
   sidebarItems,
@@ -24,7 +25,13 @@ import '../styles/dashboard.css';
 const alertPaths = {
   'Low Stock Alert': '/inventory',
   'Overdue Invoices': '/invoices',
+  'Overdue Supplier Payments': '/suppliers',
+  'Supplier Payments Due': '/suppliers',
 };
+
+function formatMoney(value) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value || 0);
+}
 
 const quickActionPaths = {
   'Add Client': '/clients/add',
@@ -158,6 +165,28 @@ export default function DashboardPage() {
         cta: 'View Invoices',
       });
     }
+    const sp = summary?.supplierPayments;
+    if ((sp?.overdue ?? 0) > 0 && !dismissed.has('Overdue Supplier Payments')) {
+      out.push({
+        variant: 'danger',
+        icon: InvoiceAlertIcon,
+        title: 'Overdue Supplier Payments',
+        description: `${formatMoney(sp.overdueAmount)} across ${sp.overdue} supplier payment(s) has passed its promised date. Total outstanding to suppliers: ${formatMoney(sp.outstanding)}.`,
+        cta: 'View Suppliers',
+      });
+    }
+    if ((sp?.dueSoon ?? 0) > 0 && !dismissed.has('Supplier Payments Due')) {
+      const todayNote = sp.dueToday > 0 ? ` (${sp.dueToday} due today)` : '';
+      const later = Math.max(0, (sp.outstanding || 0) - (sp.dueSoonAmount || 0) - (sp.overdueAmount || 0));
+      const laterNote = later > 0 ? ` A further ${formatMoney(later)} is due later.` : '';
+      out.push({
+        variant: 'warning',
+        icon: WarningIcon,
+        title: 'Supplier Payments Due',
+        description: `${formatMoney(sp.dueSoonAmount)} of ${formatMoney(sp.outstanding)} outstanding is due within the next 3 days${todayNote}.${laterNote}`,
+        cta: 'View Suppliers',
+      });
+    }
     return out;
   }, [summary, dismissed]);
 
@@ -169,12 +198,24 @@ export default function DashboardPage() {
     });
   };
 
-  const linkedQuickActions = quickActions.map((action) => ({
-    ...action,
-    onClick: quickActionPaths[action.label]
-      ? () => navigate(quickActionPaths[action.label])
-      : undefined,
-  }));
+  const quickActionPermissions = {
+    'Add Client': ['clients', 'create'],
+    'Add Item': ['inventory', 'create'],
+    'New Invoice': ['invoices', 'create'],
+    'Record Payment': ['payments', 'create'],
+  };
+
+  const linkedQuickActions = quickActions
+    .filter((action) => {
+      const required = quickActionPermissions[action.label];
+      return !required || can(required[0], required[1]);
+    })
+    .map((action) => ({
+      ...action,
+      onClick: quickActionPaths[action.label]
+        ? () => navigate(quickActionPaths[action.label])
+        : undefined,
+    }));
 
   return (
     <main className="dashboard-shell">
@@ -209,11 +250,13 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <QuickActions
-            title="Quick Actions"
-            subtitle="Common tasks to get you started"
-            actions={linkedQuickActions}
-          />
+          {linkedQuickActions.length > 0 ? (
+            <QuickActions
+              title="Quick Actions"
+              subtitle="Common tasks to get you started"
+              actions={linkedQuickActions}
+            />
+          ) : null}
 
           <section className="stat-grid">
             {computedMetrics.map((metric) => (
