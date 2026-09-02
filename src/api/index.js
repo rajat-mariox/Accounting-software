@@ -35,11 +35,13 @@ export const suppliersApi = {
   remove: (id) => api.delete(`/suppliers/${id}`),
   listActivities: () => api.get('/suppliers/activities'),
   createActivity: (payload) => api.post('/suppliers/activities', payload),
+  recordActivityPayment: (id, payload) => api.post(`/suppliers/activities/${id}/payment`, payload),
 };
 
 export const inventoryApi = {
   list: () => api.get('/inventory'),
   overview: () => api.get('/inventory/overview'),
+  distribution: () => api.get('/inventory/distribution'),
   create: (payload) => api.post('/inventory', payload),
   update: (id, payload) => api.put(`/inventory/${id}`, payload),
   remove: (id) => api.delete(`/inventory/${id}`),

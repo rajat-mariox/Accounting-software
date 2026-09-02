@@ -14,19 +14,19 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState('sales');
   const [salesByMonth, setSalesByMonth] = useState([]);
   const [topClients, setTopClients] = useState([]);
-  const [overview, setOverview] = useState([]);
+  const [distribution, setDistribution] = useState({ categories: [], totalItems: 0, totalUnits: 0, lowStockItems: 0 });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([reportsApi.sales(), reportsApi.topClients(), inventoryApi.overview()])
-      .then(([salesData, topData, overviewData]) => {
+    Promise.all([reportsApi.sales(), reportsApi.topClients(), inventoryApi.distribution()])
+      .then(([salesData, topData, distributionData]) => {
         if (cancelled) return;
         setSalesByMonth(salesData);
         setTopClients(topData);
-        setOverview(overviewData);
+        setDistribution(distributionData);
       })
       .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load reports'))
       .finally(() => !cancelled && setLoading(false));
@@ -42,17 +42,21 @@ export default function ReportsPage() {
       return <PurchaseReport sales={salesByMonth} />;
     }
     if (activeTab === 'inventory') {
-      return <InventoryReport overview={overview} />;
+      return <InventoryReport distribution={distribution} />;
     }
     return <SalesReport sales={salesByMonth} topClients={topClients} />;
-  }, [activeTab, loading, loadError, salesByMonth, topClients, overview]);
+  }, [activeTab, loading, loadError, salesByMonth, topClients, distribution]);
 
   function handleExport() {
     const today = new Date().toISOString().slice(0, 10);
     if (activeTab === 'inventory') {
       const rows = [
-        ['Status', 'Count'],
-        ...overview.map((row) => [row.label, row.value]),
+        ['Category', 'Items', 'Stock Units', 'Share (%)'],
+        ...distribution.categories.map((row) => [row.label, row.items, row.units, row.percent]),
+        [],
+        ['Total Items', distribution.totalItems],
+        ['Total Stock Units', distribution.totalUnits],
+        ['Low Stock Items', distribution.lowStockItems],
       ];
       downloadCsv(`inventory-report-${today}.csv`, toCsv(rows));
       return;
@@ -142,27 +146,38 @@ export default function ReportsPage() {
   );
 }
 
+const TREND_MONTHS = 6;
+
 function buildMonthlyView(sales) {
-  // Always render Jan–Jun of the current year, zero-filling missing months so the
-  // chart x-axis is stable regardless of which months actually have invoices.
-  const currentYear = new Date().getFullYear();
+  // Render a rolling window of the latest TREND_MONTHS months ending with the current
+  // month (e.g. Mar–Aug on 27 Aug), zero-filling months with no invoices so the
+  // chart x-axis is stable.
   const totals = new Map();
   const counts = new Map();
   sales.forEach((row) => {
-    if (row?.id?.year !== currentYear) return;
-    totals.set(row.id.month, Number(row.total) || 0);
-    counts.set(row.id.month, Number(row.count) || 0);
+    if (!row?.id) return;
+    const key = `${row.id.year}-${row.id.month}`;
+    totals.set(key, Number(row.total) || 0);
+    counts.set(key, Number(row.count) || 0);
   });
-  const labels = MONTHS.slice(0, 6);
-  const values = [1, 2, 3, 4, 5, 6].map((m) => totals.get(m) || 0);
-  const countsArr = [1, 2, 3, 4, 5, 6].map((m) => counts.get(m) || 0);
+  const now = new Date();
+  const labels = [];
+  const values = [];
+  const countsArr = [];
+  for (let i = TREND_MONTHS - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+    labels.push(MONTHS[d.getMonth()]);
+    values.push(totals.get(key) || 0);
+    countsArr.push(counts.get(key) || 0);
+  }
   return { labels, values, counts: countsArr };
 }
 
 function SalesReport({ sales, topClients }) {
   const { labels, values, counts } = buildMonthlyView(sales);
-  const breakdown = sales.map((row, idx) => ({
-    month: labels[idx],
+  const breakdown = labels.map((label, idx) => ({
+    month: label,
     invoices: counts[idx],
     totalSales: values[idx],
     avgValue: counts[idx] > 0 ? values[idx] / counts[idx] : 0,
@@ -246,25 +261,28 @@ function PurchaseReport({ sales }) {
   );
 }
 
-function InventoryReport({ overview }) {
-  const palette = { 'In Stock': '#22c55e', 'Low Stock': '#eab308', 'Out of Stock': '#ef4444' };
-  const segments = overview.map((row) => ({
-    label: row.label,
-    value: row.value,
-    color: palette[row.label] || '#94a3b8',
+const CATEGORY_COLORS = ['#2563eb', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b'];
+
+function InventoryReport({ distribution }) {
+  const { categories = [], totalItems = 0, totalUnits = 0, lowStockItems = 0 } = distribution || {};
+  // Slice size = stock units per category (falls back to item count when nothing is in stock).
+  const useUnits = totalUnits > 0;
+  const segments = categories.map((row, index) => ({
+    label: `${row.label} ${row.percent}%`,
+    value: useUnits ? row.units : row.items,
+    color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
   }));
-  const stockSummary = overview.map((row) => ({
-    label: row.label,
-    value: row.value,
-    tone: row.id === 'in-stock' ? 'success' : row.id === 'low-stock' ? 'warning' : 'danger',
-  }));
-  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const stockSummary = [
+    { label: 'Total Items', value: totalItems, tone: 'blue' },
+    { label: 'Total Stock Units', value: totalUnits, tone: 'green' },
+    { label: 'Low Stock Items', value: lowStockItems, tone: 'red' },
+  ];
 
   return (
     <section className="reports-grid reports-grid--two">
       <article className="report-card">
         <h2>Inventory Distribution</h2>
-        {total === 0 ? <p>No inventory yet.</p> : <PieChart segments={segments} />}
+        {totalItems === 0 ? <p>No inventory yet.</p> : <PieChart segments={segments} />}
       </article>
 
       <article className="report-card">
@@ -430,10 +448,13 @@ function PieChart({ segments }) {
   const cy = 150;
   const radius = 95;
   const labelRadius = 130;
-  const total = segments.reduce((sum, segment) => sum + segment.value, 0) || 1;
+  // Zero-value segments have no area and would only stack their labels on top
+  // of each other, so leave them out of the drawing entirely.
+  const visibleSegments = segments.filter((segment) => segment.value > 0);
+  const total = visibleSegments.reduce((sum, segment) => sum + segment.value, 0) || 1;
   let accumulated = 0;
 
-  const renderedSegments = segments.map((segment) => {
+  const renderedSegments = visibleSegments.map((segment) => {
     const startAngle = (accumulated / total) * Math.PI * 2;
     const sweepAngle = (segment.value / total) * Math.PI * 2;
     const endAngle = startAngle + sweepAngle;
@@ -445,6 +466,9 @@ function PieChart({ segments }) {
 
     return {
       ...segment,
+      // A single segment covering 100% is a full circle: an SVG arc whose start
+      // and end points coincide renders nothing, so draw a <circle> instead.
+      isFullCircle: segment.value >= total,
       path: describeArc(cx, cy, radius, startAngle, endAngle),
       labelX: labelPoint.x,
       labelY: labelPoint.y,
@@ -461,15 +485,27 @@ function PieChart({ segments }) {
         role="img"
         aria-label="Inventory distribution chart"
       >
-        {renderedSegments.map((segment) => (
-          <path
-            key={`slice-${segment.label}`}
-            d={segment.path}
-            fill={segment.color}
-            stroke="#ffffff"
-            strokeWidth="1"
-          />
-        ))}
+        {renderedSegments.map((segment) =>
+          segment.isFullCircle ? (
+            <circle
+              key={`slice-${segment.label}`}
+              cx={cx}
+              cy={cy}
+              r={radius}
+              fill={segment.color}
+              stroke="#ffffff"
+              strokeWidth="1"
+            />
+          ) : (
+            <path
+              key={`slice-${segment.label}`}
+              d={segment.path}
+              fill={segment.color}
+              stroke="#ffffff"
+              strokeWidth="1"
+            />
+          )
+        )}
         {renderedSegments.map((segment) => (
           <text
             key={`label-${segment.label}`}

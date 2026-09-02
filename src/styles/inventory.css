@@ -663,3 +663,31 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Per-warehouse stock breakdown in tables */
+.location-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.location-list__entry {
+  white-space: nowrap;
+}
+
+.location-list__entry strong {
+  font-weight: 600;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #6b7280;
+}
+
+.warehouse-card__free {
+  font-weight: 400;
+  color: #6b7280;
+}

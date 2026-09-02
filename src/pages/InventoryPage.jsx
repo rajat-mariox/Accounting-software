@@ -4,7 +4,7 @@ import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { CheckCircleIcon, CloseIcon, PlusIcon, TrashIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
 import { inventoryTabs } from '../data/inventory';
-import { inventoryApi, warehousesApi, transfersApi } from '../api';
+import { inventoryApi, warehousesApi, transfersApi, settingsApi } from '../api';
 import {
   warehouseIconSrc,
   adjustStockIconSrc,
@@ -22,9 +22,12 @@ import '../styles/clients.css';
 import '../styles/inventory.css';
 import '../styles/form-errors.css';
 
+const DEFAULT_CATEGORY = 'Others';
+
 const emptyForm = {
   name: '',
   unit: 'piece',
+  category: DEFAULT_CATEGORY,
   price: '',
   stock: '',
   threshold: '10',
@@ -39,6 +42,7 @@ const emptyWarehouseForm = {
 
 const emptyStockAdjustForm = {
   itemId: '',
+  warehouse: '',
   type: 'in',
   quantity: '',
 };
@@ -55,6 +59,7 @@ function validateItemForm(form) {
   const errors = {};
   if (!isNonEmpty(form.name)) errors.name = 'Item name is required.';
   if (!isNonEmpty(form.unit)) errors.unit = 'Unit is required.';
+  if (!isNonEmpty(form.category)) errors.category = 'Select a category.';
   if (!isPositiveNumber(form.price)) {
     errors.price = 'Price must be greater than 0.';
   }
@@ -87,13 +92,14 @@ function validateWarehouseForm(form) {
 function validateStockAdjustForm(form) {
   const errors = {};
   if (!isNonEmpty(form.itemId)) errors.itemId = 'Select an item.';
+  if (!isNonEmpty(form.warehouse)) errors.warehouse = 'Select a warehouse.';
   if (!isPositiveInteger(form.quantity)) {
     errors.quantity = 'Quantity must be a whole number greater than 0.';
   }
   return errors;
 }
 
-function validateTransferForm(form) {
+function validateTransferForm(form, item, warehouses) {
   const errors = {};
   if (!isNonEmpty(form.item)) errors.item = 'Select an item.';
   if (!isNonEmpty(form.from)) errors.from = 'Select source warehouse.';
@@ -103,8 +109,44 @@ function validateTransferForm(form) {
   }
   if (!isPositiveInteger(form.qty)) {
     errors.qty = 'Quantity must be a whole number greater than 0.';
+  } else if (item && form.from) {
+    const available = qtyAtName(item, form.from);
+    if (Number(form.qty) > available) {
+      errors.qty = `Only ${available} ${item.unit || 'units'} available in ${form.from}.`;
+    }
+  }
+  if (!errors.qty && form.to && Array.isArray(warehouses)) {
+    const destination = warehouses.find((w) => w.name === form.to);
+    if (destination && destination.capacity > 0) {
+      const free = Math.max(0, destination.capacity - (destination.totalStock ?? 0));
+      if (Number(form.qty) > free) {
+        errors.qty = `${destination.name} only has ${free} of ${destination.capacity} capacity free.`;
+      }
+    }
   }
   return errors;
+}
+
+/** Per-warehouse stock entries for an item: [{ warehouse, warehouseName, qty }]. */
+function getLocations(item) {
+  if (!item) return [];
+  if (Array.isArray(item.stocks) && item.stocks.length > 0) {
+    return item.stocks.filter((entry) => Number(entry.qty) > 0);
+  }
+  if (item.warehouse && Number(item.stock) > 0) {
+    return [{ warehouse: item.warehouse, warehouseName: item.warehouseName || '', qty: item.stock }];
+  }
+  return [];
+}
+
+function qtyAt(item, warehouseId) {
+  const entry = getLocations(item).find((loc) => String(loc.warehouse) === String(warehouseId));
+  return entry ? Number(entry.qty) : 0;
+}
+
+function qtyAtName(item, warehouseName) {
+  const entry = getLocations(item).find((loc) => loc.warehouseName === warehouseName);
+  return entry ? Number(entry.qty) : 0;
 }
 
 function formatDate(value) {
@@ -118,6 +160,7 @@ export default function InventoryPage({ initialAction }) {
   const [activeTab, setActiveTab] = useState('items');
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [categories, setCategories] = useState([DEFAULT_CATEGORY]);
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -138,12 +181,22 @@ export default function InventoryPage({ initialAction }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([inventoryApi.list(), warehousesApi.list(), transfersApi.list()])
-      .then(([itemsRows, warehouseRows, transferRows]) => {
+    Promise.all([
+      inventoryApi.list(),
+      warehousesApi.list(),
+      transfersApi.list(),
+      // Categories are optional for the page to work; fall back to the default only.
+      settingsApi.get('inventory').catch(() => ({ categories: [DEFAULT_CATEGORY] })),
+    ])
+      .then(([itemsRows, warehouseRows, transferRows, inventorySettings]) => {
         if (cancelled) return;
         setItems(itemsRows);
         setWarehouses(warehouseRows);
         setTransfers(transferRows);
+        const list = Array.isArray(inventorySettings?.categories) && inventorySettings.categories.length > 0
+          ? inventorySettings.categories
+          : [DEFAULT_CATEGORY];
+        setCategories(list);
       })
       .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load inventory'))
       .finally(() => !cancelled && setLoading(false));
@@ -151,6 +204,14 @@ export default function InventoryPage({ initialAction }) {
       cancelled = true;
     };
   }, []);
+
+  async function refreshWarehouses() {
+    try {
+      setWarehouses(await warehousesApi.list());
+    } catch {
+      // totals will catch up on next load
+    }
+  }
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -188,7 +249,15 @@ export default function InventoryPage({ initialAction }) {
 
   function handleStockAdjustChange(event) {
     const { name, value } = event.target;
-    setStockAdjustForm((current) => ({ ...current, [name]: value }));
+    setStockAdjustForm((current) => {
+      const next = { ...current, [name]: value };
+      if (name === 'itemId') {
+        // default to the warehouse that currently holds this item
+        const picked = items.find((row) => row.id === value);
+        next.warehouse = getLocations(picked)[0]?.warehouse ?? warehouses[0]?.id ?? '';
+      }
+      return next;
+    });
     setStockErrors((current) => {
       if (!current[name]) return current;
       const next = { ...current };
@@ -199,7 +268,18 @@ export default function InventoryPage({ initialAction }) {
 
   function handleTransferChange(event) {
     const { name, value } = event.target;
-    setTransferForm((current) => ({ ...current, [name]: value }));
+    setTransferForm((current) => {
+      const next = { ...current, [name]: value };
+      if (name === 'item') {
+        // source must be a warehouse that actually holds the item
+        const picked = items.find((row) => row.id === value);
+        const locations = getLocations(picked);
+        if (!locations.some((loc) => loc.warehouseName === next.from)) {
+          next.from = locations[0]?.warehouseName ?? '';
+        }
+      }
+      return next;
+    });
     setTransferErrors((current) => {
       if (!current[name]) return current;
       const next = { ...current };
@@ -209,17 +289,25 @@ export default function InventoryPage({ initialAction }) {
   }
 
   function openStockAdjust() {
-    setStockAdjustForm({ ...emptyStockAdjustForm, itemId: items[0]?.id ?? '' });
+    const first = items[0];
+    setStockAdjustForm({
+      ...emptyStockAdjustForm,
+      itemId: first?.id ?? '',
+      warehouse: getLocations(first)[0]?.warehouse ?? warehouses[0]?.id ?? '',
+    });
     setStockErrors({});
     setModalMode('stock-adjust');
   }
 
   function openTransfer() {
+    const first = items[0];
+    const from = getLocations(first)[0]?.warehouseName ?? '';
+    const to = warehouses.find((w) => w.name !== from)?.name ?? '';
     setTransferForm({
       ...emptyTransferForm,
-      item: items[0]?.id ?? '',
-      from: warehouses[0]?.name ?? '',
-      to: warehouses[1]?.name ?? warehouses[0]?.name ?? '',
+      item: first?.id ?? '',
+      from,
+      to,
     });
     setTransferErrors({});
     setModalMode('transfer-add');
@@ -235,13 +323,23 @@ export default function InventoryPage({ initialAction }) {
     const item = items.find((row) => row.id === stockAdjustForm.itemId);
     if (!item) return;
     const qty = Number(stockAdjustForm.quantity);
+    const current = qtyAt(item, stockAdjustForm.warehouse);
+    if (stockAdjustForm.type === 'out' && qty > current) {
+      const whName = warehouses.find((w) => w.id === stockAdjustForm.warehouse)?.name || 'this warehouse';
+      setStockErrors({ quantity: `Only ${current} ${item.unit || 'units'} available in ${whName}.` });
+      return;
+    }
     const delta = stockAdjustForm.type === 'out' ? -qty : qty;
-    const nextStock = Math.max(0, (item.stock || 0) + delta);
+    const nextStock = Math.max(0, current + delta);
 
     setSubmitting(true);
     try {
-      const updated = await inventoryApi.update(item.id, { stock: nextStock });
+      const updated = await inventoryApi.update(item.id, {
+        stock: nextStock,
+        warehouse: stockAdjustForm.warehouse,
+      });
       setItems((current) => current.map((row) => (row.id === item.id ? updated : row)));
+      refreshWarehouses();
       setStockAdjustForm(emptyStockAdjustForm);
       setStockErrors({});
       setModalMode(null);
@@ -280,7 +378,11 @@ export default function InventoryPage({ initialAction }) {
   }
 
   function openAdd() {
-    setForm({ ...emptyForm, warehouse: warehouses[0]?.id ?? '' });
+    setForm({
+      ...emptyForm,
+      category: categories.includes(DEFAULT_CATEGORY) ? DEFAULT_CATEGORY : categories[0] ?? '',
+      warehouse: warehouses[0]?.id ?? '',
+    });
     setErrors({});
     setEditing(null);
     setModalMode('add');
@@ -291,6 +393,7 @@ export default function InventoryPage({ initialAction }) {
     setForm({
       name: row.name || '',
       unit: row.unit || 'piece',
+      category: row.category || DEFAULT_CATEGORY,
       price: String(row.price ?? ''),
       stock: String(row.stock ?? ''),
       threshold: String(row.lowStockThreshold ?? 10),
@@ -322,14 +425,20 @@ export default function InventoryPage({ initialAction }) {
       setErrors(validationErrors);
       return;
     }
+    const multiLocation = modalMode === 'edit' && getLocations(editing).length > 1;
     const payload = {
       name: form.name,
       unit: form.unit,
+      category: form.category,
       price: Number(form.price),
-      stock: Number(form.stock),
       lowStockThreshold: Number(form.threshold),
-      warehouse: form.warehouse,
     };
+    if (!multiLocation) {
+      // Single-location items: stock + warehouse are editable here.
+      // Multi-location items keep their breakdown (use Adjust Stock / Transfer).
+      payload.stock = Number(form.stock);
+      payload.warehouse = form.warehouse;
+    }
     setSubmitting(true);
     try {
       if (modalMode === 'edit' && editing) {
@@ -341,6 +450,7 @@ export default function InventoryPage({ initialAction }) {
         setItems((current) => [...current, created]);
         setToast('Item added successfully');
       }
+      refreshWarehouses();
       closeModal();
     } catch (err) {
       setErrors({ form: err.message || 'Could not save item' });
@@ -351,7 +461,8 @@ export default function InventoryPage({ initialAction }) {
 
   async function handleTransferSubmit(event) {
     event.preventDefault();
-    const validationErrors = validateTransferForm(transferForm);
+    const transferItem = items.find((row) => row.id === transferForm.item);
+    const validationErrors = validateTransferForm(transferForm, transferItem, warehouses);
     if (Object.keys(validationErrors).length > 0) {
       setTransferErrors(validationErrors);
       return;
@@ -365,14 +476,18 @@ export default function InventoryPage({ initialAction }) {
         qty: Number(transferForm.qty),
         date: transferForm.date || undefined,
       });
-      setTransfers((current) => [created, ...current]);
-      // refresh items in case stock or warehouse changed
-      try {
-        const refreshed = await inventoryApi.list();
-        setItems(refreshed);
-      } catch {
-        // ignore
+      const { updatedItem, ...transferRow } = created;
+      setTransfers((current) => [transferRow, ...current]);
+      if (updatedItem) {
+        setItems((current) => current.map((row) => (row.id === updatedItem.id ? updatedItem : row)));
+      } else {
+        try {
+          setItems(await inventoryApi.list());
+        } catch {
+          // ignore
+        }
       }
+      refreshWarehouses();
       setTransferForm(emptyTransferForm);
       setTransferErrors({});
       setModalMode(null);
@@ -390,6 +505,7 @@ export default function InventoryPage({ initialAction }) {
     try {
       await inventoryApi.remove(deletingItem.id);
       setItems((current) => current.filter((row) => row.id !== deletingItem.id));
+      refreshWarehouses();
       closeModal();
       setToast('Item deleted successfully');
     } catch (err) {
@@ -483,6 +599,8 @@ export default function InventoryPage({ initialAction }) {
             form={form}
             errors={errors}
             warehouses={warehouses}
+            categories={categories}
+            locations={modalMode === 'edit' ? getLocations(editing) : []}
             onChange={handleChange}
             onCancel={closeModal}
             onSubmit={handleSubmit}
@@ -506,6 +624,7 @@ export default function InventoryPage({ initialAction }) {
             form={stockAdjustForm}
             errors={stockErrors}
             items={items}
+            warehouses={warehouses}
             onChange={handleStockAdjustChange}
             onCancel={closeModal}
             onSubmit={handleStockAdjustSubmit}
@@ -584,7 +703,9 @@ function TransfersTable({ rows }) {
   );
 }
 
-function AdjustStockModal({ form, errors = {}, items, onChange, onCancel, onSubmit, submitting }) {
+function AdjustStockModal({ form, errors = {}, items, warehouses, onChange, onCancel, onSubmit, submitting }) {
+  const selectedItem = items.find((item) => item.id === form.itemId);
+  const currentQty = qtyAt(selectedItem, form.warehouse);
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -625,6 +746,30 @@ function AdjustStockModal({ form, errors = {}, items, onChange, onCancel, onSubm
                 ))}
               </select>
               {errors.itemId ? <span className="field-error">{errors.itemId}</span> : null}
+            </label>
+
+            <label className="app-modal-field">
+              <span>Warehouse</span>
+              <select
+                name="warehouse"
+                value={form.warehouse}
+                onChange={onChange}
+                aria-invalid={Boolean(errors.warehouse)}
+                className={errors.warehouse ? 'field-input--invalid' : ''}
+              >
+                <option value="" disabled></option>
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} (current: {qtyAt(selectedItem, w.id)})
+                  </option>
+                ))}
+              </select>
+              {errors.warehouse ? <span className="field-error">{errors.warehouse}</span> : null}
+              {selectedItem && form.warehouse ? (
+                <span className="field-hint">
+                  Current stock here: {currentQty} {selectedItem.unit}
+                </span>
+              ) : null}
             </label>
 
             <label className="app-modal-field">
@@ -669,6 +814,14 @@ function AdjustStockModal({ form, errors = {}, items, onChange, onCancel, onSubm
 }
 
 function TransferFormModal({ form, errors = {}, items, warehouses, onChange, onCancel, onSubmit, submitting }) {
+  const selectedItem = items.find((item) => item.id === form.item);
+  const locations = getLocations(selectedItem);
+  const available = qtyAtName(selectedItem, form.from);
+  const destination = warehouses.find((w) => w.name === form.to);
+  const destinationFree =
+    destination && destination.capacity > 0
+      ? Math.max(0, destination.capacity - (destination.totalStock ?? 0))
+      : null;
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -716,13 +869,16 @@ function TransferFormModal({ form, errors = {}, items, warehouses, onChange, onC
                 className={errors.from ? 'field-input--invalid' : ''}
               >
                 <option value="" disabled></option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={w.name}>
-                    {w.name}
+                {locations.map((loc) => (
+                  <option key={loc.warehouse} value={loc.warehouseName}>
+                    {loc.warehouseName} ({loc.qty} {selectedItem?.unit || ''} available)
                   </option>
                 ))}
               </select>
               {errors.from ? <span className="field-error">{errors.from}</span> : null}
+              {selectedItem && locations.length === 0 ? (
+                <span className="field-error">This item has no stock in any warehouse.</span>
+              ) : null}
             </label>
 
             <label className="app-modal-field">
@@ -742,6 +898,11 @@ function TransferFormModal({ form, errors = {}, items, warehouses, onChange, onC
                 ))}
               </select>
               {errors.to ? <span className="field-error">{errors.to}</span> : null}
+              {destinationFree !== null ? (
+                <span className="field-hint">
+                  Free space in {destination.name}: {destinationFree} of {destination.capacity}
+                </span>
+              ) : null}
             </label>
 
             <label className="app-modal-field">
@@ -756,8 +917,14 @@ function TransferFormModal({ form, errors = {}, items, warehouses, onChange, onC
                 placeholder="0"
                 aria-invalid={Boolean(errors.qty)}
                 className={errors.qty ? 'field-input--invalid' : ''}
+                max={available || undefined}
               />
               {errors.qty ? <span className="field-error">{errors.qty}</span> : null}
+              {selectedItem && form.from ? (
+                <span className="field-hint">
+                  Available in {form.from}: {available} {selectedItem.unit}
+                </span>
+              ) : null}
             </label>
 
             <label className="app-modal-field">
@@ -782,6 +949,27 @@ function TransferFormModal({ form, errors = {}, items, warehouses, onChange, onC
   );
 }
 
+/**
+ * One table row per warehouse an item is stored in. An item held in two
+ * warehouses becomes two rows (each with its local quantity); items with no
+ * location stay as a single row.
+ */
+function expandByWarehouse(items) {
+  return items.flatMap((item) => {
+    const locations = getLocations(item);
+    if (locations.length === 0) {
+      return [{ ...item, rowKey: item.id, localQty: item.stock, locationName: item.warehouseName || '-', locationCount: 0 }];
+    }
+    return locations.map((loc) => ({
+      ...item,
+      rowKey: `${item.id}:${loc.warehouse}`,
+      localQty: Number(loc.qty),
+      locationName: loc.warehouseName,
+      locationCount: locations.length,
+    }));
+  });
+}
+
 function StockTable({ rows }) {
   return (
     <div className="table-wrap">
@@ -795,15 +983,15 @@ function StockTable({ rows }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {expandByWarehouse(rows).map((row) => {
             const isLow = row.statusTone === 'danger';
             return (
-              <tr key={row.id}>
+              <tr key={row.rowKey}>
                 <td className="stock-table__item">{row.name}</td>
                 <td className={`stock-table__qty${isLow ? ' stock-table__qty--low' : ''}`}>
-                  {row.stock} {row.unit}
+                  {row.localQty} {row.unit}
                 </td>
-                <td className="stock-table__warehouse">{row.warehouseName || '-'}</td>
+                <td className="stock-table__warehouse">{row.locationName}</td>
                 <td>
                   <span className={`stock-pill ${isLow ? 'stock-pill--low' : 'stock-pill--healthy'}`}>
                     {isLow ? 'Low Stock' : 'Healthy'}
@@ -850,11 +1038,18 @@ function WarehousesGrid({ rows }) {
               </div>
               <div>
                 <dt>Total Stock:</dt>
-                <dd>{row.totalStock ?? 0}</dd>
+                <dd className={row.capacity > 0 && row.totalStock >= row.capacity ? 'inventory-low' : ''}>
+                  {row.totalStock ?? 0}
+                </dd>
               </div>
               <div>
                 <dt>Capacity:</dt>
-                <dd>{row.capacity}</dd>
+                <dd>
+                  {row.capacity}
+                  {row.capacity > 0 ? (
+                    <span className="warehouse-card__free"> ({Math.max(0, row.capacity - (row.totalStock ?? 0))} free)</span>
+                  ) : null}
+                </dd>
               </div>
             </dl>
           </div>
@@ -949,6 +1144,7 @@ function ItemsTable({ rows, onEdit, onDelete }) {
         <thead>
           <tr>
             <th>Name</th>
+            <th>Category</th>
             <th>Unit</th>
             <th>Price</th>
             <th>Stock</th>
@@ -959,15 +1155,18 @@ function ItemsTable({ rows, onEdit, onDelete }) {
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td colSpan="7">No items yet.</td></tr>
+            <tr><td colSpan="8">No items yet.</td></tr>
           ) : (
-            rows.map((row) => (
-              <tr key={row.id}>
+            expandByWarehouse(rows).map((row) => (
+              <tr key={row.rowKey}>
                 <td className="inventory-name">{row.name}</td>
+                <td className="inventory-muted">{row.category || DEFAULT_CATEGORY}</td>
                 <td className="inventory-muted">{row.unit}</td>
                 <td>{formatPrice(row.price)}</td>
-                <td className={row.statusTone === 'danger' ? 'inventory-low' : ''}>{row.stock}</td>
-                <td>{row.warehouseName || '-'}</td>
+                <td className={row.statusTone === 'danger' ? 'inventory-low' : ''}>
+                  {row.localQty}
+                </td>
+                <td>{row.locationName}</td>
                 <td>
                   <span className={`inventory-pill inventory-pill--${row.statusTone}`}>{row.status}</span>
                 </td>
@@ -990,7 +1189,12 @@ function ItemsTable({ rows, onEdit, onDelete }) {
   );
 }
 
-function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, onChange, onCancel, onSubmit, submitting }) {
+function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, categories = [], locations = [], onChange, onCancel, onSubmit, submitting }) {
+  // Keep an item's existing category selectable even if it was removed from Settings.
+  const categoryOptions = form.category && !categories.includes(form.category)
+    ? [...categories, form.category]
+    : categories;
+  const multiLocation = locations.length > 1;
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
@@ -1024,6 +1228,25 @@ function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, onCh
             </label>
 
             <label className="app-modal-field">
+              <span>Category</span>
+              <select
+                name="category"
+                value={form.category}
+                onChange={onChange}
+                aria-invalid={Boolean(errors.category)}
+                className={errors.category ? 'field-input--invalid' : ''}
+              >
+                {categoryOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              {errors.category ? <span className="field-error">{errors.category}</span> : null}
+              <span className="field-hint">Manage the list under Settings → Inventory Categories.</span>
+            </label>
+
+            <label className="app-modal-field">
               <span>Unit</span>
               <input
                 name="unit"
@@ -1054,7 +1277,7 @@ function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, onCh
             </label>
 
             <label className="app-modal-field">
-              <span>Stock</span>
+              <span>Stock{multiLocation ? ' (total)' : ''}</span>
               <input
                 name="stock"
                 value={form.stock}
@@ -1063,10 +1286,17 @@ function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, onCh
                 min="0"
                 step="1"
                 placeholder="0"
+                disabled={multiLocation}
                 aria-invalid={Boolean(errors.stock)}
                 className={errors.stock ? 'field-input--invalid' : ''}
               />
               {errors.stock ? <span className="field-error">{errors.stock}</span> : null}
+              {multiLocation ? (
+                <span className="field-hint">
+                  Stored in {locations.map((loc) => `${loc.warehouseName}: ${loc.qty}`).join(' · ')}. Use
+                  Adjust Stock or Transfer to change per-warehouse quantities.
+                </span>
+              ) : null}
             </label>
 
             <label className="app-modal-field">
@@ -1091,6 +1321,7 @@ function ItemFormModal({ title, submitLabel, form, errors = {}, warehouses, onCh
                 name="warehouse"
                 value={form.warehouse}
                 onChange={onChange}
+                disabled={multiLocation}
                 aria-invalid={Boolean(errors.warehouse)}
                 className={errors.warehouse ? 'field-input--invalid' : ''}
               >

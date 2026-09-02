@@ -5,10 +5,12 @@ import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { CheckCircleIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
 import { settingsTabs } from '../data/settings';
+import { can } from '../utils/auth';
 import { authApi, settingsApi } from '../api';
 import { getStoredUser, setStoredUser } from '../utils/auth';
 import { isStrongEnoughPassword, isValidPhone, sanitizePhoneInput } from '../utils/validators';
 import {
+  inventoryIconSrc,
   settingsCompanyIconSrc,
   taxConfigIconSrc,
   usersRolesShieldIconSrc,
@@ -20,16 +22,21 @@ import '../styles/form-errors.css';
 const emptyCompany = { name: '', email: '', phone: '', address: '' };
 const emptyTax = { rate: 0, registrationNumber: '' };
 const emptyPasswordForm = { currentPassword: '', newPassword: '', confirmPassword: '' };
-
-const VALID_TABS = new Set(settingsTabs.map((t) => t.id));
+const DEFAULT_CATEGORY = 'Others';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  // Computed per render (not at module load) so it reflects the logged-in user.
+  const visibleSettingsTabs = settingsTabs.filter(
+    (tab) => tab.id === 'account' || can('settings', 'view'),
+  );
+  const VALID_TABS = new Set(visibleSettingsTabs.map((t) => t.id));
   const initialTab = (() => {
     const params = new URLSearchParams(location.search);
     const candidate = params.get('tab');
-    return candidate && VALID_TABS.has(candidate) ? candidate : 'company';
+    const fallback = VALID_TABS.has('company') ? 'company' : 'account';
+    return candidate && VALID_TABS.has(candidate) ? candidate : fallback;
   })();
 
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -41,6 +48,16 @@ export default function SettingsPage() {
   const [savingCompany, setSavingCompany] = useState(false);
   const [savingTax, setSavingTax] = useState(false);
   const [companyErrors, setCompanyErrors] = useState({});
+
+  // Inventory categories: `savedCategories` mirrors the server; `categories` is the
+  // working copy. `renames` tracks {from, to} so the backend can relabel items.
+  const [savedCategories, setSavedCategories] = useState([DEFAULT_CATEGORY]);
+  const [categories, setCategories] = useState([DEFAULT_CATEGORY]);
+  const [renames, setRenames] = useState([]);
+  const [newCategory, setNewCategory] = useState('');
+  const [editingCategory, setEditingCategory] = useState(null); // { original, draft }
+  const [categoryError, setCategoryError] = useState('');
+  const [savingCategories, setSavingCategories] = useState(false);
 
   const [profile, setProfile] = useState(() => getStoredUser());
   const [passwordForm, setPasswordForm] = useState(emptyPasswordForm);
@@ -86,6 +103,12 @@ export default function SettingsPage() {
           phone: sanitizePhoneInput(incoming.phone || ''),
         });
         setTax({ ...emptyTax, ...(all.tax || {}) });
+        const list = Array.isArray(all.inventory?.categories) && all.inventory.categories.length > 0
+          ? all.inventory.categories
+          : [DEFAULT_CATEGORY];
+        setSavedCategories(list);
+        setCategories(list);
+        setRenames([]);
       })
       .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load settings'))
       .finally(() => !cancelled && setLoading(false));
@@ -169,6 +192,103 @@ export default function SettingsPage() {
     }
   }
 
+  const categoriesDirty =
+    renames.length > 0 ||
+    categories.length !== savedCategories.length ||
+    categories.some((name, idx) => name !== savedCategories[idx]);
+
+  function categoryExists(name, ignore) {
+    const key = name.toLowerCase();
+    return categories.some((c) => c !== ignore && c.toLowerCase() === key);
+  }
+
+  function addCategory() {
+    const name = newCategory.trim();
+    if (!name) {
+      setCategoryError('Enter a category name.');
+      return;
+    }
+    if (categoryExists(name)) {
+      setCategoryError(`"${name}" already exists.`);
+      return;
+    }
+    setCategories((current) => [...current, name]);
+    setNewCategory('');
+    setCategoryError('');
+  }
+
+  function removeCategory(name) {
+    if (name === DEFAULT_CATEGORY) return;
+    setCategories((current) => current.filter((c) => c !== name));
+    // Dropping a category that was only just added/renamed needs no rename record.
+    setRenames((current) => current.filter((r) => r.to !== name));
+    setCategoryError('');
+  }
+
+  function startRename(name) {
+    if (name === DEFAULT_CATEGORY) return;
+    setEditingCategory({ original: name, draft: name });
+    setCategoryError('');
+  }
+
+  function commitRename() {
+    if (!editingCategory) return;
+    const { original, draft } = editingCategory;
+    const name = draft.trim();
+    if (!name) {
+      setCategoryError('Category name cannot be empty.');
+      return;
+    }
+    if (name !== original && categoryExists(name, original)) {
+      setCategoryError(`"${name}" already exists.`);
+      return;
+    }
+    if (name !== original) {
+      setCategories((current) => current.map((c) => (c === original ? name : c)));
+      setRenames((current) => {
+        // Chain renames so the server maps the *saved* name to the final one.
+        const existing = current.find((r) => r.to === original);
+        if (existing) {
+          return current.map((r) => (r === existing ? { ...r, to: name } : r));
+        }
+        if (savedCategories.includes(original)) {
+          return [...current, { from: original, to: name }];
+        }
+        return current;
+      });
+    }
+    setEditingCategory(null);
+    setCategoryError('');
+  }
+
+  async function saveCategories() {
+    setSavingCategories(true);
+    setCategoryError('');
+    try {
+      const updated = await settingsApi.update('inventory', { categories, renames });
+      const list = Array.isArray(updated?.categories) && updated.categories.length > 0
+        ? updated.categories
+        : [DEFAULT_CATEGORY];
+      setSavedCategories(list);
+      setCategories(list);
+      setRenames([]);
+      setEditingCategory(null);
+      setToast('Inventory categories saved');
+    } catch (err) {
+      setCategoryError(err.message || 'Could not save categories');
+    } finally {
+      setSavingCategories(false);
+    }
+  }
+
+  function resetCategories() {
+    setCategories(savedCategories);
+    setRenames([]);
+    setEditingCategory(null);
+    setNewCategory('');
+    setCategoryError('');
+  }
+
   function handlePasswordChange(field) {
     return (event) => {
       const value = event.target.value;
@@ -244,7 +364,7 @@ export default function SettingsPage() {
           {loadError ? <p className="auth-error">{loadError}</p> : null}
 
           <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-            {settingsTabs.map((tab) => (
+            {visibleSettingsTabs.map((tab) => (
               <button
                 key={tab.id}
                 type="button"
@@ -370,9 +490,145 @@ export default function SettingsPage() {
                   error={companyErrors.phone}
                 />
                 <Field label="Address" value={company.address} onChange={handleCompanyChange('address')} />
+                {can('settings', 'edit') ? (
                 <button type="button" className="settings-primary-button" onClick={saveCompany} disabled={savingCompany}>
                   {savingCompany ? 'Saving…' : 'Save Changes'}
                 </button>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === 'inventory' ? (
+            <section className="settings-card">
+              <div className="settings-card__header">
+                <div className="settings-card__title">
+                  <div className="settings-card__icon">
+                    <img src={inventoryIconSrc} alt="" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h2>Inventory Categories</h2>
+                    <p>Categories offered when adding or editing an inventory item</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-form settings-form--compact">
+                {can('settings', 'edit') ? (
+                  <div className="category-add">
+                    <input
+                      type="text"
+                      value={newCategory}
+                      placeholder="New category name"
+                      maxLength={40}
+                      onChange={(event) => {
+                        setNewCategory(event.target.value);
+                        if (categoryError) setCategoryError('');
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          addCategory();
+                        }
+                      }}
+                    />
+                    <button type="button" className="settings-primary-button" onClick={addCategory}>
+                      Add Category
+                    </button>
+                  </div>
+                ) : null}
+
+                <ul className="category-list" aria-label="Inventory categories">
+                  {categories.map((name) => {
+                    const isDefault = name === DEFAULT_CATEGORY;
+                    const isEditing = editingCategory?.original === name;
+                    return (
+                      <li key={name} className="category-row">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            className="category-row__input"
+                            value={editingCategory.draft}
+                            maxLength={40}
+                            autoFocus
+                            onChange={(event) =>
+                              setEditingCategory((current) => ({ ...current, draft: event.target.value }))
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                commitRename();
+                              } else if (event.key === 'Escape') {
+                                setEditingCategory(null);
+                                setCategoryError('');
+                              }
+                            }}
+                          />
+                        ) : (
+                          <span className="category-row__name">
+                            {name}
+                            {isDefault ? <em className="category-row__badge">default</em> : null}
+                          </span>
+                        )}
+
+                        {can('settings', 'edit') && !isDefault ? (
+                          <div className="category-row__actions">
+                            {isEditing ? (
+                              <>
+                                <button type="button" className="category-row__button" onClick={commitRename}>
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  className="category-row__button"
+                                  onClick={() => {
+                                    setEditingCategory(null);
+                                    setCategoryError('');
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button type="button" className="category-row__button" onClick={() => startRename(name)}>
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  className="category-row__button category-row__button--danger"
+                                  onClick={() => removeCategory(name)}
+                                >
+                                  Remove
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {categoryError ? <p className="auth-error">{categoryError}</p> : null}
+
+                {can('settings', 'edit') ? (
+                  <div className="category-actions">
+                    <button
+                      type="button"
+                      className="settings-primary-button"
+                      onClick={saveCategories}
+                      disabled={savingCategories || !categoriesDirty}
+                    >
+                      {savingCategories ? 'Saving…' : 'Save Changes'}
+                    </button>
+                    {categoriesDirty ? (
+                      <button type="button" className="category-row__button" onClick={resetCategories} disabled={savingCategories}>
+                        Discard
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -394,9 +650,11 @@ export default function SettingsPage() {
               <div className="settings-form settings-form--compact">
                 <Field label="Default Tax Rate (%)" value={String(tax.rate ?? 0)} onChange={handleTaxChange('rate')} />
                 <Field label="Tax Registration Number" value={tax.registrationNumber || ''} onChange={handleTaxChange('registrationNumber')} />
+                {can('settings', 'edit') ? (
                 <button type="button" className="settings-primary-button" onClick={saveTax} disabled={savingTax}>
                   {savingTax ? 'Saving…' : 'Save Changes'}
                 </button>
+                ) : null}
               </div>
             </section>
           ) : null}

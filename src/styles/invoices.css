@@ -404,6 +404,10 @@
 
 .invoice-modal {
   width: min(100%, 896px);
+  /* Never taller than the viewport (minus the backdrop's 24px padding);
+     the body below the header scrolls instead. */
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
@@ -508,6 +512,16 @@
   flex-direction: column;
   gap: 24px;
   flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* The scrollable body must scroll, not squash: without this, flex compresses
+   children like .invoice-lines (overflow:hidden lets it shrink to ~0) and the
+   items/discount/tax/totals get clipped out of view. */
+.invoice-create > *,
+.invoice-detail > * {
+  flex-shrink: 0;
 }
 
 .invoice-create__grid {
@@ -718,6 +732,8 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .invoice-lines {
@@ -1053,5 +1069,73 @@
 
   .invoice-table {
     min-width: 760px;
+  }
+}
+
+/* Pricing breakdown + partial payments */
+.invoice-pill--partial {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.invoice-balance-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #b45309;
+}
+
+.invoice-pricing {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin-top: 12px;
+}
+
+.invoice-totals__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  color: #64748b;
+  padding: 4px 0;
+}
+
+.invoice-detail__total--balance strong {
+  color: #ef4444;
+}
+
+.invoice-payment-title {
+  margin-top: 16px;
+}
+
+.invoice-paynow-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: #000000;
+  cursor: pointer;
+}
+
+.invoice-paynow-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--ds-brand);
+  cursor: pointer;
+}
+
+.invoice-field__hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 640px) {
+  .invoice-pricing {
+    grid-template-columns: 1fr;
   }
 }

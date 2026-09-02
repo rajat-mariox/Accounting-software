@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { projectLogoSrc } from '../../utils/images';
+import { can } from '../../utils/auth';
 import HelpDocsModal from './HelpDocsModal';
 import '../../styles/help.css';
 
 export default function DashboardSidebar({ brand, items }) {
   const [helpOpen, setHelpOpen] = useState(false);
+  // Items tagged with a permission module are hidden without view access;
+  // untagged items (e.g. Settings, which hosts My Account) always show.
+  const visibleItems = items.filter((item) => !item.module || can(item.module, 'view'));
 
   return (
     <aside className="dashboard-sidebar">
@@ -25,7 +29,7 @@ export default function DashboardSidebar({ brand, items }) {
       </div>
 
       <nav className="dashboard-nav" aria-label="Primary">
-        {items.map((item, index) => {
+        {visibleItems.map((item, index) => {
           const Icon = item.icon;
           return (
             <NavLink

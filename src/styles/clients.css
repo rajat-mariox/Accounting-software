@@ -254,10 +254,26 @@
 
 .client-modal {
   width: min(100%, 420px);
+  /* Never taller than the viewport; long forms scroll inside the modal. */
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
   border-radius: var(--ds-radius-lg);
   background: #fff;
   box-shadow: 0 26px 70px rgba(18, 27, 41, 0.28);
   overflow: hidden;
+}
+
+/* Header stays pinned; whatever follows it scrolls. */
+.client-modal > .client-modal__header {
+  flex: 0 0 auto;
+}
+
+.client-modal > :not(.client-modal__header) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .client-modal--wide {
@@ -658,5 +674,17 @@
 
   .invoice-history-item__meta {
     justify-items: start;
+  }
+}
+
+.client-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+@media (max-width: 520px) {
+  .client-field-row {
+    grid-template-columns: 1fr;
   }
 }

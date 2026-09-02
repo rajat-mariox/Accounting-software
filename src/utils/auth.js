@@ -1,7 +1,24 @@
+import { resolvePermissions } from '../data/permissions';
+
 const USER_KEY = 'auth_user';
 const TOKEN_KEY = 'auth_token';
 
+// Permission check for the logged-in user, e.g. can('invoices', 'create').
+// Backend middleware enforces the same grid — this only drives the UI.
+export function can(module, action = 'view') {
+  const user = getStoredUser();
+  if (!user) return false;
+  if (user.role === 'Administrator') return true;
+  const granted = resolvePermissions(user)[module];
+  return Array.isArray(granted) && granted.includes(action);
+}
+
 export const DEFAULT_PASSWORD = 'Admin@123';
+
+// Landing page after sign-in: client portal logins have no dashboard access.
+export function homePathFor(user = getStoredUser()) {
+  return user?.role === 'Client' ? '/invoices' : '/dashboard';
+}
 
 export function getStoredUser() {
   try {

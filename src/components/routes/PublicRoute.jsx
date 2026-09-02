@@ -1,11 +1,11 @@
 import { Navigate } from 'react-router-dom';
-import { getStoredUser } from '../../utils/auth';
+import { getStoredUser, homePathFor } from '../../utils/auth';
 
-export default function PublicRoute({ children, redirectTo = '/dashboard' }) {
+export default function PublicRoute({ children, redirectTo }) {
   const user = getStoredUser();
 
   if (user) {
-    return <Navigate to={redirectTo} replace />;
+    return <Navigate to={redirectTo ?? homePathFor(user)} replace />;
   }
 
   return children;
