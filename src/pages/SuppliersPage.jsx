@@ -3,7 +3,7 @@ import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
 import { CheckCircleIcon, CloseIcon, PlusIcon, TrashIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
-import { suppliersApi, inventoryApi } from '../api';
+import { suppliersApi } from '../api';
 import { formatCurrency } from '../utils/formatters';
 import {
   isNonEmpty,
@@ -87,7 +87,7 @@ function validateSupplierForm(form) {
 function validateActivityForm(form) {
   const errors = {};
   if (!isNonEmpty(form.supplier)) errors.supplier = 'Select a supplier.';
-  if (!isNonEmpty(form.item)) errors.item = 'Select an item.';
+  if (!isNonEmpty(form.item)) errors.item = 'Enter an item name.';
   if (!isPositiveInteger(form.quantity)) {
     errors.quantity = 'Quantity must be a whole number greater than 0.';
   }
@@ -142,7 +142,6 @@ export default function SuppliersPage() {
   const [activeTab, setActiveTab] = useState('suppliers');
   const [suppliers, setSuppliers] = useState([]);
   const [activities, setActivities] = useState([]);
-  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [modalMode, setModalMode] = useState(null);
@@ -165,12 +164,11 @@ export default function SuppliersPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([suppliersApi.list(), suppliersApi.listActivities(), inventoryApi.list()])
-      .then(([suppliersRows, activityRows, itemRows]) => {
+    Promise.all([suppliersApi.list(), suppliersApi.listActivities()])
+      .then(([suppliersRows, activityRows]) => {
         if (cancelled) return;
         setSuppliers(suppliersRows);
         setActivities(activityRows);
-        setItems(itemRows);
       })
       .catch((err) => !cancelled && setLoadError(err.message || 'Failed to load suppliers'))
       .finally(() => !cancelled && setLoading(false));
@@ -510,7 +508,6 @@ export default function SuppliersPage() {
             form={activityForm}
             errors={activityErrors}
             suppliers={suppliers}
-            items={items}
             onChange={handleActivityChange}
             onCancel={closeRecord}
             onSubmit={handleRecordSubmit}
@@ -666,7 +663,7 @@ function DeleteSupplierDialog({ supplier, onCancel, onDelete, submitting }) {
   );
 }
 
-function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCancel, onSubmit, submitting }) {
+function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onCancel, onSubmit, submitting }) {
   const quantity = Number(form.quantity) || 0;
   const pricePerUnit = Number(form.pricePerUnit) || 0;
   const total = quantity * pricePerUnit;
@@ -711,20 +708,15 @@ function RecordSupplyModal({ form, errors = {}, suppliers, items, onChange, onCa
 
           <label className="client-field">
             <span>Item<span className="client-field__required">*</span></span>
-            <select
+            <input
               name="item"
+              type="text"
               value={form.item}
               onChange={onChange}
+              placeholder="e.g. Cement bags"
               aria-invalid={Boolean(errors.item)}
               className={errors.item ? 'field-input--invalid' : ''}
-            >
-              <option value="" disabled></option>
-              {items.map((item) => (
-                <option key={item.id} value={item.name}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            />
             {errors.item ? <span className="field-error">{errors.item}</span> : null}
           </label>
 
