@@ -1364,3 +1364,33 @@ body {
   padding: 10px 22px;
   border-radius: 8px;
 }
+
+/* Eye button that opens an attached supplier invoice (Suppliers + Payments pages). */
+.attachment-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attachment-view-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #e8f1fb;
+  color: #1d4ed8;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.attachment-view-button:hover {
+  background: #d6e6f8;
+}
+
+.attachment-view-button svg {
+  width: 16px;
+  height: 16px;
+}

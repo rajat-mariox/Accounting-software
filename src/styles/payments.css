@@ -106,6 +106,10 @@
   background: #fef3c7;
 }
 
+.payment-stat-card__icon--red {
+  background: #fee2e2;
+}
+
 .payment-stat-card__text {
   display: flex;
   flex-direction: column;
@@ -472,8 +476,57 @@
   box-shadow: 0 4px 10px rgba(34, 197, 94, 0.28);
 }
 
+.payments-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.payments-card__count {
+  min-width: 28px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.payments-subtext {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.payments-table td.payments-amount--out {
+  color: #b45309;
+}
+
+/* Client view has a fourth card (amount due). */
+.payments-stats--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.payments-table td.payments-due {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.payments-table td.payments-due--clear {
+  color: #15803d;
+}
+
+@media (max-width: 1400px) {
+  .payments-stats--four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1180px) {
-  .payments-stats {
+  .payments-stats,
+  .payments-stats--four {
     grid-template-columns: 1fr;
   }
 }
@@ -500,4 +553,190 @@
   .payments-table {
     min-width: 760px;
   }
+}
+
+/* ============================================================
+   CLIENT / SUPPLIER TABS
+   ============================================================ */
+.payments-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  justify-self: start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.payments-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 20px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.payments-tab:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.payments-tab:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.payments-tab + .payments-tab {
+  border-left: 0;
+}
+
+.payments-tab:hover:not(.payments-tab--active) {
+  background: #f8fafc;
+}
+
+.payments-tab--active {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.payments-tab__count {
+  min-width: 22px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.payments-tab--active .payments-tab__count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.payments-card__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.payments-table td.payments-owed {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.payments-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.payments-status--pending {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.payments-status--partial {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.payments-status--overdue {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.payments-pay-button {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.payments-pay-button:hover {
+  background: #1d4ed8;
+}
+
+.payments-notice {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Client / Supplier switch on the left, Record Payment on the right, below the stats. */
+.payments-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.payments-toolbar .payments-create-button {
+  margin-left: auto;
+}
+
+.payments-goods__line {
+  display: block;
+  white-space: nowrap;
+}
+
+.payments-goods__line + .payments-goods__line {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+/* Payment received in a different currency */
+.payments-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  cursor: pointer;
+}
+
+.payments-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.payments-foreign {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px dashed #c7d2fe;
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+.payments-foreign__credit {
+  margin: 0;
+  font-size: 13px;
+  color: #374151;
 }

@@ -1,4 +1,17 @@
 import { api } from './client';
+import { getStoredToken } from '../utils/auth';
+
+async function fetchBlob(path) {
+  const token = getStoredToken();
+  const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || 'Could not open the attached invoice');
+  }
+  return response.blob();
+}
 
 export const authApi = {
   login: (email, password) => api.post('/auth/login', { email, password }, { auth: false }),
@@ -34,6 +47,11 @@ export const suppliersApi = {
   update: (id, payload) => api.put(`/suppliers/${id}`, payload),
   remove: (id) => api.delete(`/suppliers/${id}`),
   listActivities: () => api.get('/suppliers/activities'),
+  listPayments: () => api.get('/suppliers/payments'),
+  // Attached supplier invoices come back as Blobs (they need the auth header, so no plain link).
+  fetchActivityAttachment: (id) => fetchBlob(`/suppliers/activities/${id}/attachment`),
+  fetchPaymentAttachment: (activityId, paymentId) =>
+    fetchBlob(`/suppliers/activities/${activityId}/payments/${paymentId}/attachment`),
   createActivity: (payload) => api.post('/suppliers/activities', payload),
   recordActivityPayment: (id, payload) => api.post(`/suppliers/activities/${id}/payment`, payload),
 };

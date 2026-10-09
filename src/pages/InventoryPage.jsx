@@ -21,6 +21,7 @@ import '../styles/dashboard.css';
 import '../styles/clients.css';
 import '../styles/inventory.css';
 import '../styles/form-errors.css';
+import { formatDisplayDate, formatMoney } from '../utils/currency';
 
 const DEFAULT_CATEGORY = 'Others';
 
@@ -150,10 +151,7 @@ function qtyAtName(item, warehouseName) {
 }
 
 function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString().slice(0, 10);
+  return formatDisplayDate(value);
 }
 
 export default function InventoryPage({ initialAction }) {
@@ -1390,12 +1388,7 @@ function DeleteItemDialog({ item, onCancel, onDelete, submitting }) {
   );
 }
 
+// Item prices are kept in the base currency.
 function formatPrice(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value >= 1000 ? 0 : 0,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }).format(value);
+  return formatMoney(value);
 }

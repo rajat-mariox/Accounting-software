@@ -24,10 +24,6 @@ export default function StatCard({ icon: Icon, label, value, change, trend }) {
 }
 
 function formatStatValue(value) {
-  if (value >= 1000000) {
-    return formatCurrency(value).replace('.0', '');
-  }
-
   if (value >= 1000) {
     return formatCurrency(value);
   }

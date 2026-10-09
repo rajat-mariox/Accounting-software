@@ -21,6 +21,7 @@ import {
   InvoiceAlertIcon,
 } from '../components/dashboard/icons';
 import '../styles/dashboard.css';
+import { baseCurrency, formatDisplayDate, formatMoney as formatBaseMoney } from '../utils/currency';
 
 const alertPaths = {
   'Low Stock Alert': '/inventory',
@@ -29,8 +30,9 @@ const alertPaths = {
   'Supplier Payments Due': '/suppliers',
 };
 
+// Dashboard totals come back from the server already in the base currency.
 function formatMoney(value) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value || 0);
+  return formatBaseMoney(value);
 }
 
 const quickActionPaths = {
@@ -41,10 +43,7 @@ const quickActionPaths = {
 };
 
 function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString().slice(0, 10);
+  return formatDisplayDate(value);
 }
 
 export default function DashboardPage() {
@@ -95,6 +94,7 @@ export default function DashboardPage() {
           id: inv.invoiceNumber || inv.id,
           dueDate: formatDate(inv.dueDate),
           amount: inv.amount,
+          currency: inv.currency,
           status: inv.status,
           tone: inv.status,
         })),
@@ -107,6 +107,7 @@ export default function DashboardPage() {
       invoiceId: row.invoiceNumber || row.id,
       date: formatDate(row.createdDate),
       amount: row.amount,
+      currency: row.currency,
       status: row.status,
     }));
   }, [summary, invoices]);
@@ -234,7 +235,7 @@ export default function DashboardPage() {
           </div>
           <div className="dashboard-heading">
             <h1>Dashboard</h1>
-            <p>{loading ? 'Loading…' : 'Welcome back! Here’s what’s happening today.'}</p>
+            <p>{loading ? 'Loading…' : `Welcome back! Here’s what’s happening today. Totals are in ${baseCurrency()}.`}</p>
           </div>
 
           {computedAlerts.length > 0 && (
@@ -302,7 +303,7 @@ export default function DashboardPage() {
                       <p>Due {item.dueDate}</p>
                     </div>
                     <div className="payment-meta">
-                      <strong>{formatCurrency(item.amount)}</strong>
+                      <strong>{formatCurrency(item.amount, item.currency)}</strong>
                       <span className={`pill pill--${item.tone}`}>{item.status}</span>
                     </div>
                   </div>
@@ -335,7 +336,7 @@ export default function DashboardPage() {
                     <tr key={row.invoiceId}>
                       <td>{row.invoiceId}</td>
                       <td>{row.date}</td>
-                      <td>{formatCurrency(row.amount)}</td>
+                      <td>{formatCurrency(row.amount, row.currency)}</td>
                       <td>
                         <span className={`pill pill--${row.status}`}>{row.status}</span>
                       </td>

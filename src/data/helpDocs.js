@@ -47,14 +47,40 @@ export const helpTopics = [
   {
     id: 'suppliers',
     label: 'Suppliers',
-    summary: 'Track vendors and their contact details.',
+    summary: 'Add suppliers, record what they supply, attach their invoice, and pay them in installments.',
     sections: [
       {
-        heading: 'Managing suppliers',
+        heading: 'Adding a supplier',
         steps: [
-          'Open the Suppliers page from the sidebar.',
-          'Add a supplier with company name, contact person, email, and phone.',
-          'Linked purchase records appear under the supplier profile.',
+          'Open Suppliers from the sidebar and click "Add Supplier".',
+          'Enter the supplier name, company, email, phone, and address, then save.',
+        ],
+      },
+      {
+        heading: 'Recording a supply',
+        steps: [
+          'Switch to the "Supply Activities" tab and click "Record Supply".',
+          'Pick the supplier, enter the item, quantity, and price per unit. The total is calculated for you.',
+          'Enter the supplier\'s invoice number if they gave you one.',
+          'Use "Attach Supplier Invoice" to upload the bill the supplier gave you (PDF, PNG, JPG, or WEBP, up to 5 MB). This is optional.',
+          'Enter "Amount Paid Now" if you paid something on the spot. If money is still owed, pick a Next Payment Date. You get a reminder 3 days before that date and again if it passes unpaid.',
+          'Recording a supply does not add stock to Inventory.',
+        ],
+      },
+      {
+        heading: 'Paying a supplier in installments',
+        steps: [
+          'Any supply that is unpaid or partly paid shows an "Add Payment" button, on the Supply Activities tab and on the Payments page under Supplier Payments.',
+          'Enter the amount you are paying now (it is pre-filled with the remaining balance), the payment date, and a reference such as a cheque or transaction number.',
+          'Use "Attach Invoice / Receipt" to upload the supplier\'s receipt for this payment. Each payment keeps its own file.',
+          'If a balance is still left, pick the next payment date. The status changes from Unpaid to Partially Paid, and to Paid once the full amount is covered.',
+        ],
+      },
+      {
+        heading: 'Viewing attached invoices',
+        steps: [
+          'Rows that have an attached file show a small eye icon next to the invoice number or reference.',
+          'Click the eye icon to open the file in a new tab. Rows without a file show no icon.',
         ],
       },
     ],
@@ -84,44 +110,59 @@ export const helpTopics = [
   {
     id: 'invoices',
     label: 'Invoices',
-    summary: 'Create invoices with discount, tax, upfront payment, and a promised next payment date.',
+    summary: 'Create invoices, take part payments, track overdue amounts, and download the invoice PDF.',
     sections: [
       {
         heading: 'Creating an invoice',
         steps: [
           'Open Invoices and click "Create Invoice".',
           'Pick a client, set the created date and due date.',
-          'Add line items from inventory — you can only invoice what is in stock, and stock is deducted as soon as the invoice is created.',
-          'Discount (%) and Tax (%) are pre-filled from the client\'s defaults but can be changed per invoice. The totals box shows subtotal → discount → tax → total live.',
+          'Add line items from inventory. You can only invoice what is in stock, and stock is deducted as soon as the invoice is created.',
+          'Discount (%) and Tax (%) are pre-filled from the client\'s defaults but can be changed per invoice. The totals box shows subtotal, discount, tax, and total as you type.',
           'Invoice numbers are assigned automatically in the JGC-MM-### format and never repeat.',
         ],
       },
       {
-        heading: 'Payment section (paying now + next payment date)',
+        heading: 'Taking a payment at invoice time',
         steps: [
-          'Tick "Client is paying an amount now" if the client hands over any amount at invoice time.',
-          'Enter the Amount Received and pick the Payment Mode (Bank Transfer, Cash, Card, or Cheque). The totals box shows Paying Now and the remaining Balance Due.',
-          'Use Next Payment Date to record when the client promised to pay the balance. It is optional and hides automatically if the amount received covers the full total.',
-          'The upfront amount is saved as a real entry on the Payments page, and the invoice status becomes "partially paid" (or "paid" if it covers the full amount).',
-          'The next payment date shows in the invoice list under the status, in the View dialog, and on the downloaded PDF next to Balance Due. It clears automatically once the invoice is fully paid.',
+          'Tick "Client is paying an amount now" if the client hands over any amount when the invoice is created.',
+          'Enter the Amount Received and pick the Payment Mode (Bank Transfer, Cash, Card, or Cheque). The totals box shows the amount paying now and the balance due.',
+          'Use Next Payment Date to record when the client promised to pay the rest. It hides automatically if the amount covers the full total.',
+          'The amount is saved as a real payment on the Payments page.',
         ],
       },
       {
         heading: 'Statuses at a glance',
         steps: [
-          'Pending — issued, nothing received yet.',
-          'Partially paid — some amount received; the list shows how much is still due and the next payment date.',
-          'Paid — full amount received; the PDF download becomes available.',
-          'Overdue — past due date with a remaining balance.',
-          'Cancelled — invoice voided; its stock returns to inventory.',
+          'Pending: issued, nothing received yet.',
+          'Partially paid: some amount received. The list shows how much is still due and the next payment date under the status.',
+          'Overdue: the due date has passed with money still owed. The list shows the overdue amount and how many days late it is, for example "$300.26 overdue · 32 days late".',
+          'Paid: the full amount has been received.',
+          'Cancelled: the invoice is voided and its stock returns to inventory.',
+        ],
+      },
+      {
+        heading: 'Mark Paid',
+        steps: [
+          '"Mark Paid" settles whatever is still owed on the invoice in one click.',
+          'It also records that remaining amount as a Cash payment with the reference "Marked as paid", so the Payments page always matches the invoice.',
+          'If the client actually paid by bank transfer, card, or cheque, use Record Payment on the Payments page instead so the correct mode is saved.',
+        ],
+      },
+      {
+        heading: 'Downloading the invoice PDF',
+        steps: [
+          'The download icon is available on every invoice that is not cancelled, whether it is unpaid, partly paid, or paid.',
+          'If the invoice has payments, the PDF has one page per payment. For example, an invoice paid in two parts downloads as a 2-page PDF.',
+          'Each page shows the same goods and invoice total, plus that payment\'s number (such as "Payment 1 of 2"), date, mode, and reference, the amount paid before it, the amount of this payment, and the balance due after it.',
+          'An invoice with no payments yet downloads as a single page showing the full amount.',
         ],
       },
       {
         heading: 'After creation',
         steps: [
-          '"Mark Paid" settles the full remaining amount in one click.',
-          'Deleting an invoice returns its quantities to inventory.',
           'Use View to see items, discount, tax, paid amount, balance due, and the next payment date.',
+          'Deleting an invoice returns its quantities to inventory.',
         ],
       },
     ],
@@ -129,21 +170,60 @@ export const helpTopics = [
   {
     id: 'payments',
     label: 'Payments',
-    summary: 'Record incoming payments — upfront at invoice time or later from the Payments page.',
+    summary: 'Client receipts and supplier payouts, each in its own section.',
     sections: [
       {
-        heading: 'Two ways to record a payment',
+        heading: 'Client and supplier sections',
         steps: [
-          'At invoice time — tick "Client is paying an amount now" in the Create Invoice dialog; the payment is recorded automatically.',
-          'Later — go to Payments and click "Record Payment", choose the invoice, enter the amount and payment mode.',
+          'The Payments page has two buttons below the summary cards: "Client Payments" and "Supplier Payments". Click one to switch sections. The number on each button is how many payments it holds.',
+          'The summary cards change with the section you pick.',
+        ],
+      },
+      {
+        heading: 'Client Payments',
+        steps: [
+          'Cards show Received from Clients, Total Payments, Pending Invoices, and Due from Clients (the total still owed across all invoices).',
+          'The table lists every client payment with the invoice, client, goods bought (for example "36 × Mouse"), date, amount, mode, and reference.',
+          '"Due Now" shows what is still owed on that payment\'s invoice today. It is red while money is due and shows a green "Paid" once the invoice is settled. Two payments on the same invoice show the same amount, because it is one balance.',
+          'To record a payment, click "Record Payment", choose the invoice (it pre-fills the remaining balance), enter the amount, mode, reference, and date. A payment can never be more than the balance still due.',
+        ],
+      },
+      {
+        heading: 'Supplier Payments',
+        steps: [
+          'Cards show Paid to Suppliers, Still Owed to Suppliers, and Supplies Not Fully Paid.',
+          '"Pending Supplier Payments" lists every supply that is unpaid or partly paid, with total, paid, remaining, next payment date, and status. Click "Add Payment" on a row to pay the next installment and attach the supplier\'s receipt.',
+          '"Supplier Payment History" lists every installment paid. Click the eye icon next to a reference to open the attached supplier invoice or receipt.',
         ],
       },
       {
         heading: 'How balances work',
         steps: [
-          'A payment can never exceed the invoice\'s outstanding balance, and cancelled invoices do not accept payments.',
-          'Partial payments set the invoice to "partially paid"; it becomes "paid" automatically when the running total covers the full amount.',
+          'Partial payments set an invoice to "partially paid". It becomes "paid" automatically when the payments add up to the full total.',
+          'Cancelled invoices do not accept payments.',
           'Deleting a payment recalculates the invoice\'s paid total and status.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'client-portal',
+    label: 'Client Portal',
+    summary: 'What a client sees when they log in with their own account.',
+    sections: [
+      {
+        heading: 'Client logins',
+        steps: [
+          'Every client you add gets their own login. A client only sees their own invoices and payments, never other clients or internal sections.',
+          'If an invoice is overdue, a red banner at the top of their Invoices page shows how much is past due.',
+        ],
+      },
+      {
+        heading: 'What a client can do',
+        steps: [
+          'Invoices: see each invoice with its status, the overdue amount and days late, and download the PDF (one page per payment).',
+          'Payments: see "My Payments" with what they have paid, the goods each payment was for, how much is still due, and their total amount due.',
+          'Clients cannot record payments, mark invoices paid, or delete anything.',
         ],
       },
     ],
@@ -208,6 +288,46 @@ export const helpTopics = [
     ],
   },
   {
+    id: 'currency',
+    label: 'Currency & Region',
+    summary: 'Bill clients abroad in their own currency, take payments in another currency, and see totals in one base currency.',
+    sections: [
+      {
+        heading: 'Setting up currencies',
+        steps: [
+          'Go to Settings -> Currency & Region (Administrator).',
+          'The base currency (USD by default) is what the dashboard, reports and all totals are shown in. It cannot change once invoices, payments or supplies exist.',
+          'Add each currency you bill or get paid in with its code (e.g. SOS), name, symbol, and rate. The rate is how many units of that currency equal 1 base currency, e.g. 1 USD = 571 SOS.',
+          'Decimals and Date Format control how every amount and date is shown across the panel and on the PDF.',
+          'Update rates whenever they move. New invoices, payments and supplies save the rate in use, so changing a rate never changes old records.',
+        ],
+      },
+      {
+        heading: 'Billing a client in another currency',
+        steps: [
+          'Open the client and pick a Billing Currency. New invoices for that client start in it automatically.',
+          'In Create Invoice, the Currency and Rate fields appear once an item is added. Inventory prices are in the base currency and are converted at the rate shown; you can change the currency or rate for that invoice.',
+          'The invoice, its list row, the View dialog and the PDF all show that currency (for example "Sh 114,200.00", with "SOMALI SHILLINGS" in the amount in words).',
+        ],
+      },
+      {
+        heading: 'Payment in a different currency',
+        steps: [
+          'In Record Payment, tick "Client paid in a different currency".',
+          'Pick the currency handed over, enter the amount, and check the rate (pre-filled from Settings, shown the readable way round such as 1 USD = 571 SOS).',
+          'The form shows exactly how much will be credited to the invoice. The payment is saved in the invoice currency and the list shows what was handed over, e.g. "Sh 57,100.00 paid as $100.00".',
+        ],
+      },
+      {
+        heading: 'Supplier supplies',
+        steps: [
+          'Record Supply has a Currency field. The price, total and every installment for that supply are in that currency.',
+          'Supplier totals on the Suppliers page and the Payments summary cards are converted to the base currency.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'faq',
     label: 'FAQ',
     summary: 'Answers to the most common questions.',
@@ -216,19 +336,29 @@ export const helpTopics = [
         heading: 'Frequently asked',
         faqs: [
           {
-            question: 'The client paid only part of the invoice — how do I record that?',
+            question: 'The client paid only part of the invoice. How do I record that?',
             answer:
-              'While creating the invoice, tick "Client is paying an amount now" and enter what they gave; add a Next Payment Date for the rest. For an existing invoice, record the partial amount from the Payments page. Either way the invoice shows as "partially paid" with the balance due.',
+              'While creating the invoice, tick "Client is paying an amount now" and enter what they gave, then add a Next Payment Date for the rest. For an existing invoice, use Record Payment on the Payments page. Either way the invoice shows as "partially paid" with the balance due.',
           },
           {
-            question: 'Where do I see when a client promised to pay the balance?',
+            question: 'Why does the money received not match the value of the goods sold?',
             answer:
-              'The next payment date appears in the invoice list under the "partially paid" status, in the invoice View dialog, and on the downloaded PDF beside Balance Due. It clears automatically once the invoice is fully paid.',
+              'The client pays the invoice total, which is the goods value minus any discount plus any tax. Any invoice that is not fully paid also leaves a balance. The "Due from Clients" card on the Payments page shows exactly how much is still owed.',
           },
           {
-            question: 'How do I mark an invoice as paid?',
+            question: 'How do I download an invoice for a partial payment?',
             answer:
-              'Click "Mark Paid" on the invoice row to settle the full remaining amount, or record the final payment from the Payments page — the status updates to "paid" automatically once the total is covered.',
+              'Click the download icon on the invoice in the Invoices list. The PDF has one page per payment, and each page shows that payment and the balance left after it.',
+          },
+          {
+            question: 'I clicked Mark Paid. Why is there a new Cash payment?',
+            answer:
+              'Mark Paid records the remaining amount as a Cash payment with the reference "Marked as paid" so the invoice and the Payments page always agree. If the client paid another way, record it with Record Payment instead.',
+          },
+          {
+            question: 'Where do I see what a supplier\'s bill or receipt looked like?',
+            answer:
+              'Attach the file when you record the supply or add a supplier payment. Then click the eye icon on that row, on the Suppliers page or in Supplier Payment History on the Payments page.',
           },
           {
             question: 'Why did my stock go down when I created an invoice?',
@@ -236,14 +366,14 @@ export const helpTopics = [
               'Stock is committed at invoice time, not at payment time. Deleting or cancelling the invoice returns the quantities to inventory.',
           },
           {
-            question: 'How do I change a user’s role?',
+            question: 'How do I change a user\u2019s role?',
             answer:
               'Open Users & Roles, click the edit icon on the user row, change the Role field, and save.',
           },
           {
             question: 'Can I export reports?',
             answer:
-              'CSV export is planned. For now, reports can be screenshot or printed via your browser’s print dialog.',
+              'CSV export is planned. For now, reports can be screenshot or printed via your browser\u2019s print dialog.',
           },
         ],
       },

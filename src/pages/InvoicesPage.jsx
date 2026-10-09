@@ -6,7 +6,7 @@ import AlertBanner from '../components/dashboard/AlertBanner';
 import { CloseIcon, TrashIcon, WarningIcon, InvoiceAlertIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
 import { paymentModes } from '../data/payments';
-import { invoicesApi, clientsApi, inventoryApi } from '../api';
+import { invoicesApi, clientsApi, inventoryApi, paymentsApi } from '../api';
 import { can, getStoredUser } from '../utils/auth';
 import {
   isDueAfterCreated,
@@ -33,6 +33,7 @@ import {
 import jgcHeaderSrc from '../utils/images/jgc-header.png?inline';
 import jgcFooterSrc from '../utils/images/jgc-footer.png?inline';
 import html2pdf from 'html2pdf.js';
+import { baseCurrency, currencyRate, findCurrency, formatDisplayDate, formatMoney, getCurrencySettings, toBase } from '../utils/currency';
 import '../styles/dashboard.css';
 import '../styles/invoices.css';
 import '../styles/form-errors.css';
@@ -64,6 +65,17 @@ function invoiceBalance(invoice) {
   return Math.max(0, round2(Number(invoice.amount || 0) - Number(invoice.amountPaid || 0)));
 }
 
+// Whole days past the promised date (next payment date if set, else the due date).
+function overdueDays(invoice) {
+  const promised = invoice.nextPaymentDate || invoice.dueDate;
+  if (!promised) return 0;
+  const due = new Date(promised);
+  if (Number.isNaN(due.getTime())) return 0;
+  const today = new Date();
+  const startToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.max(0, Math.floor((startToday - due.getTime()) / 86400000));
+}
+
 const STATUS_LABEL = {
   paid: 'paid',
   partial: 'partially paid',
@@ -73,10 +85,7 @@ const STATUS_LABEL = {
 };
 
 function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString().slice(0, 10);
+  return formatDisplayDate(value);
 }
 
 function escapeHtml(value) {
@@ -129,35 +138,28 @@ function numberToWords(value) {
   return parts.join(' ');
 }
 
-function amountInWords(amount) {
+// "ONE HUNDRED US DOLLARS AND FIVE CENTS ONLY" — words use the invoice currency's name.
+function amountInWords(amount, currencyCode) {
   const total = Math.round((Number(amount) || 0) * 100);
-  const dollars = Math.floor(total / 100);
-  const cents = total % 100;
-  const dollarWords = `${numberToWords(dollars)} ${dollars === 1 ? 'DOLLAR' : 'DOLLARS'}`;
-  if (!cents) return `${dollarWords} ONLY`;
-  return `${dollarWords} AND ${numberToWords(cents)} ${cents === 1 ? 'CENT' : 'CENTS'} ONLY`;
-}
-
-function formatDocMoney(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value || 0);
+  const major = Math.floor(total / 100);
+  const minor = total % 100;
+  const name = String(findCurrency(currencyCode).name || currencyCode || 'US Dollar').toUpperCase();
+  const plural = name.endsWith('S') ? name : `${name}S`;
+  const majorWords = `${numberToWords(major)} ${major === 1 ? name : plural}`;
+  if (!minor) return `${majorWords} ONLY`;
+  return `${majorWords} AND ${numberToWords(minor)} ${minor === 1 ? 'CENT' : 'CENTS'} ONLY`;
 }
 
 function formatDocDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  const dd = String(date.getDate()).padStart(2, '0');
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${date.getFullYear()}`;
+  return formatDisplayDate(value);
 }
 
-function buildInvoiceHtml(invoice, client) {
+// `payment` (optional) makes this the invoice page for one payment:
+// { index, count, amount, date, mode, reference, paidBefore, balanceAfter }.
+function buildInvoiceHtml(invoice, client, payment) {
   const number = invoice.invoiceNumber || invoice.id;
+  const code = invoice.currency || baseCurrency();
+  const formatDocMoney = (value) => formatMoney(value, code);
   const items = invoice.items || [];
   const rows = items
     .map(
@@ -168,7 +170,7 @@ function buildInvoiceHtml(invoice, client) {
         <td class="r">${formatDocMoney(item.price)}</td>
         <td class="c">${escapeHtml(item.unit || 'Pcs')}</td>
         <td class="c">${escapeHtml(item.quantity)}</td>
-        <td class="r">${item.price * item.quantity ? formatDocMoney(item.price * item.quantity) : '$&nbsp;&nbsp;&nbsp;-'}</td>
+        <td class="r">${item.price * item.quantity ? formatDocMoney(item.price * item.quantity) : '-'}</td>
       </tr>`,
     )
     .join('');
@@ -178,38 +180,47 @@ function buildInvoiceHtml(invoice, client) {
 <head>
 <meta charset="utf-8" />
 <title>Invoice ${escapeHtml(number)}</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: 'Cambria', 'Georgia', 'Times New Roman', serif; color: #111; margin: 0; background: #fff; }
-  .page { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; min-height: 100vh; }
-  .banner { display: block; width: 100%; height: auto; }
-  .banner--header { margin-bottom: 26px; }
-  .content { padding: 0 32px; }
-  table.doc { width: 100%; border-collapse: collapse; }
-  table.doc td, table.doc th { border: 1.5px solid #111; padding: 6px 10px; font-size: 14px; vertical-align: top; }
-  .label { font-weight: 700; }
-  .u { text-decoration: underline; }
-  .red { color: #e02020; }
-  .title-cell { text-align: center; vertical-align: middle !important; font-size: 24px; font-weight: 700; }
-  .c { text-align: center; }
-  .r { text-align: right; }
-  table.items td, table.items th { vertical-align: middle; }
-  table.items th { background: #eee; text-align: center; font-size: 13px; }
-  table.items th.desc { font-style: italic; color: #4472c4; font-weight: 600; font-size: 16px; }
-  .total-row td { font-size: 17px; font-weight: 700; }
-  .words-row td { padding: 16px 12px; text-align: center; font-weight: 700; }
-  .footer { margin-top: auto; padding-top: 26px; }
-  @media print { .page { min-height: auto; } body { margin: 0; } }
-</style>
 </head>
-<body>
+<body style="margin:0;background:#fff">
+<div class="jgc-invoice">
+<style>
+  /* Scoped to .jgc-invoice: the PDF library copies this element into the app page
+     before rendering, so styles must travel with it and must not touch the app. */
+  .jgc-invoice { width: 794px; margin: 0; background: #fff; color: #111;
+    font-family: 'Cambria', 'Georgia', 'Times New Roman', serif; font-size: 14px; line-height: 1.35;
+    -webkit-font-smoothing: antialiased; }
+  .jgc-invoice * { box-sizing: border-box; font-family: inherit; }
+  .jgc-invoice .page { width: 794px; min-height: 1120px; display: flex; flex-direction: column; }
+  .jgc-invoice .banner { display: block; width: 100%; height: auto; }
+  .jgc-invoice .banner--header { margin-bottom: 22px; }
+  .jgc-invoice .content { padding: 0 36px; }
+  .jgc-invoice table.doc { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .jgc-invoice table.doc td,
+  .jgc-invoice table.doc th { border: 1px solid #111; padding: 6px 10px; font-size: 13.5px;
+    vertical-align: middle; overflow-wrap: anywhere; }
+  .jgc-invoice .label { font-weight: 700; }
+  .jgc-invoice .u { text-decoration: underline; }
+  .jgc-invoice .red { color: #e02020; }
+  .jgc-invoice .title-cell { text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+  .jgc-invoice .c { text-align: center; }
+  .jgc-invoice .r { text-align: right; white-space: nowrap; }
+  .jgc-invoice table.items th { background: #eee; text-align: center; font-size: 12.5px; font-weight: 700; line-height: 1.2; }
+  .jgc-invoice table.items th.desc { font-style: italic; color: #4472c4; font-weight: 600; font-size: 15px; }
+  .jgc-invoice table.doc td.blank { border-top: none; border-bottom: none; }
+  .jgc-invoice table.items th:first-child { white-space: nowrap; }
+  .jgc-invoice .sum-label { text-align: right; font-weight: 600; white-space: nowrap; }
+  .jgc-invoice .total-row td { font-size: 15.5px; font-weight: 700; }
+  .jgc-invoice .words-row td { padding: 12px; text-align: center; font-weight: 700; }
+  .jgc-invoice .footer { margin-top: auto; padding-top: 24px; }
+</style>
 <div class="page">
   <img class="banner banner--header" src="${jgcHeaderSrc}" alt="Jubba Group of Companies" />
 
   <div class="content">
   <table class="doc">
+    <colgroup><col style="width:52%" /><col style="width:22%" /><col style="width:26%" /></colgroup>
     <tr>
-      <td class="label u" style="width:52%">ISSUER</td>
+      <td class="label u">ISSUER</td>
       <td class="title-cell red" colspan="2" rowspan="2">COMMERCIAL INVOICE</td>
     </tr>
     <tr>
@@ -220,8 +231,8 @@ function buildInvoiceHtml(invoice, client) {
     </tr>
     <tr>
       <td class="label">TO: ${escapeHtml((invoice.clientName || '').toUpperCase())}</td>
-      <td class="label" style="width:23%">INVOICE NO.</td>
-      <td class="c" style="width:25%">${escapeHtml(number)}</td>
+      <td class="label">INVOICE NO.</td>
+      <td class="c">${escapeHtml(number)}</td>
     </tr>
     <tr>
       <td class="label u">${escapeHtml((invoice.clientName || '').toUpperCase())}</td>
@@ -235,73 +246,110 @@ function buildInvoiceHtml(invoice, client) {
     </tr>
     <tr>
       <td class="label" colspan="1">STATUS</td>
-      <td colspan="2" style="text-transform:uppercase">${escapeHtml(invoice.status || '')}</td>
+      <td colspan="2" class="c" style="text-transform:uppercase">${escapeHtml(
+        payment ? (payment.balanceAfter > 0.005 ? 'Partially paid' : 'Paid') : invoice.status || ''
+      )}</td>
     </tr>
+    ${payment ? `
+    <tr>
+      <td class="label">PAYMENT ${escapeHtml(`${payment.index} OF ${payment.count}`)}</td>
+      <td colspan="2" class="c" style="text-transform:uppercase">${escapeHtml(
+        [
+          formatDocDate(payment.date),
+          payment.mode,
+          payment.reference,
+          payment.received ? `paid as ${formatMoney(payment.received.amount, payment.received.currency)}` : '',
+        ].filter(Boolean).join(' / ')
+      )}</td>
+    </tr>` : ''}
     ${invoice.notes ? `<tr><td class="label">NOTES</td><td colspan="2">${escapeHtml(invoice.notes)}</td></tr>` : ''}
   </table>
 
-  <table class="doc items" style="margin-top:-1.5px">
+  <table class="doc items" style="margin-top:-1px">
+    <colgroup>
+      <col style="width:9%" /><col style="width:35%" /><col style="width:14%" />
+      <col style="width:10%" /><col style="width:12%" /><col style="width:20%" />
+    </colgroup>
     <thead>
       <tr>
-        <th style="width:7%">ITEM</th>
+        <th>ITEM</th>
         <th class="desc">Description</th>
-        <th style="width:12%">UNIT<br/>PRICE</th>
-        <th style="width:12%">UNIT</th>
-        <th style="width:9%">QTY</th>
-        <th style="width:16%">AMOUNT</th>
+        <th>UNIT<br/>PRICE</th>
+        <th>UNIT</th>
+        <th>QTY</th>
+        <th>AMOUNT</th>
       </tr>
     </thead>
     <tbody>
       ${rows || '<tr><td colspan="6" class="c">No items</td></tr>'}
       ${Number(invoice.discountAmount) > 0 || Number(invoice.taxAmount) > 0 ? `
       <tr>
-        <td colspan="3"></td>
-        <td class="c">SUBTOTAL</td>
-        <td class="c">USD</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">SUBTOTAL</td>
+        <td class="c">${escapeHtml(code)}</td>
         <td class="r">${formatDocMoney(invoice.subtotal ?? invoice.amount)}</td>
       </tr>` : ''}
       ${Number(invoice.discountAmount) > 0 ? `
       <tr>
-        <td colspan="3"></td>
-        <td class="c">DISCOUNT ${escapeHtml(String(invoice.discountPercent || 0))}%</td>
-        <td class="c">USD</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">DISCOUNT ${escapeHtml(String(invoice.discountPercent || 0))}%</td>
+        <td class="c">${escapeHtml(code)}</td>
         <td class="r">-${formatDocMoney(invoice.discountAmount)}</td>
       </tr>` : ''}
       ${Number(invoice.taxAmount) > 0 ? `
       <tr>
-        <td colspan="3"></td>
-        <td class="c">TAX ${escapeHtml(String(invoice.taxRate || 0))}%</td>
-        <td class="c">USD</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">TAX ${escapeHtml(String(invoice.taxRate || 0))}%</td>
+        <td class="c">${escapeHtml(code)}</td>
         <td class="r">${formatDocMoney(invoice.taxAmount)}</td>
       </tr>` : ''}
       <tr class="total-row">
-        <td colspan="3"></td>
-        <td class="c red">TOTAL</td>
-        <td class="c red">USD</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label red">TOTAL</td>
+        <td class="c red">${escapeHtml(code)}</td>
         <td class="r red">${formatDocMoney(invoice.amount)}</td>
       </tr>
-      ${Number(invoice.amountPaid) > 0 && Number(invoice.amountPaid) < Number(invoice.amount) ? `
+      ${payment ? `
+      ${payment.paidBefore > 0.005 ? `
       <tr>
-        <td colspan="3"></td>
-        <td class="c">PAID</td>
-        <td class="c">USD</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">PAID BEFORE</td>
+        <td class="c">${escapeHtml(code)}</td>
+        <td class="r">${formatDocMoney(payment.paidBefore)}</td>
+      </tr>` : ''}
+      <tr class="total-row">
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">THIS PAYMENT</td>
+        <td class="c">${escapeHtml(code)}</td>
+        <td class="r">${formatDocMoney(payment.amount)}</td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label red">BALANCE DUE</td>
+        <td class="c red">${escapeHtml(code)}</td>
+        <td class="r red">${formatDocMoney(payment.balanceAfter)}</td>
+      </tr>` : Number(invoice.amountPaid) > 0 && Number(invoice.amountPaid) < Number(invoice.amount) ? `
+      <tr>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">PAID</td>
+        <td class="c">${escapeHtml(code)}</td>
         <td class="r">${formatDocMoney(invoice.amountPaid)}</td>
       </tr>
       <tr class="total-row">
-        <td colspan="3"></td>
-        <td class="c red">BALANCE DUE</td>
-        <td class="c red">USD</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label red">BALANCE DUE</td>
+        <td class="c red">${escapeHtml(code)}</td>
         <td class="r red">${formatDocMoney(Number(invoice.amount) - Number(invoice.amountPaid))}</td>
       </tr>
       ${invoice.nextPaymentDate ? `
       <tr>
-        <td colspan="3"></td>
-        <td class="c">NEXT PAYMENT</td>
-        <td colspan="2" class="c">${escapeHtml(formatDocDate(invoice.nextPaymentDate))}</td>
+        <td colspan="2" class="blank"></td>
+        <td colspan="2" class="sum-label">NEXT PAYMENT</td>
+        <td colspan="2" class="r">${escapeHtml(formatDocDate(invoice.nextPaymentDate))}</td>
       </tr>` : ''}` : ''}
       <tr class="words-row">
         <td colspan="2" class="red">AMOUNT IN<br/>WORDS</td>
-        <td colspan="4" class="red">${escapeHtml(amountInWords(invoice.amount))}</td>
+        <td colspan="4" class="red">${escapeHtml(amountInWords(invoice.amount, code))}</td>
       </tr>
     </tbody>
   </table>
@@ -311,45 +359,89 @@ function buildInvoiceHtml(invoice, client) {
     <img class="banner" src="${jgcFooterSrc}" alt="Contact: 0619998770 / 0616111139, Info@jubbagroup.so, Mogadishu Somalia" />
   </div>
 </div>
+</div>
 </body>
 </html>`;
 }
 
-async function downloadInvoice(invoice, client) {
-  const html = buildInvoiceHtml(invoice, client);
-  // Render the invoice in a hidden iframe so its styles cannot clash with the app,
-  // then convert that document to a real PDF.
+// One page per payment, oldest first, each showing that payment and the balance
+// left after it. An invoice with no payments yet gets the normal single page.
+function paymentPages(invoice, payments) {
+  const total = Number(invoice.amount || 0);
+  const sorted = [...payments].sort(
+    (a, b) => new Date(a.date) - new Date(b.date) || String(a.id).localeCompare(String(b.id))
+  );
+  let paid = 0;
+  return sorted.map((payment, index) => {
+    const paidBefore = paid;
+    paid = round2(paid + Number(payment.amount || 0));
+    return {
+      index: index + 1,
+      count: sorted.length,
+      amount: payment.amount,
+      date: payment.date,
+      mode: payment.mode,
+      reference: payment.reference,
+      received: payment.received?.amount ? payment.received : null,
+      paidBefore,
+      balanceAfter: Math.max(0, round2(total - paid)),
+    };
+  });
+}
+
+// Writes the page HTML into a hidden iframe (so its styles cannot clash with the
+// app) and resolves with that iframe once its images have loaded.
+function renderInIframe(html) {
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.left = '-10000px';
   iframe.style.top = '0';
-  iframe.style.width = '820px';
+  iframe.style.width = '794px';
   iframe.style.height = '1160px';
   document.body.appendChild(iframe);
+  const doc = iframe.contentDocument;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  return new Promise((resolve) => {
+    if (doc.readyState === 'complete') {
+      setTimeout(() => resolve(iframe), 150);
+    } else {
+      iframe.onload = () => setTimeout(() => resolve(iframe), 150);
+    }
+  });
+}
+
+async function downloadInvoice(invoice, client, payments = []) {
+  const pages = payments.length
+    ? paymentPages(invoice, payments).map((payment) => buildInvoiceHtml(invoice, client, payment))
+    : [buildInvoiceHtml(invoice, client)];
+  const iframes = [];
   try {
-    const doc = iframe.contentDocument;
-    doc.open();
-    doc.write(html);
-    doc.close();
-    await new Promise((resolve) => {
-      if (doc.readyState === 'complete') {
-        setTimeout(resolve, 150);
-      } else {
-        iframe.onload = () => setTimeout(resolve, 150);
-      }
-    });
-    await html2pdf()
+    for (const html of pages) iframes.push(await renderInIframe(html));
+    // Each payment page is rendered on its own, then appended to the same PDF.
+    let worker = html2pdf()
       .set({
         margin: 0,
         filename: `${invoice.invoiceNumber || invoice.id}.pdf`,
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, windowWidth: 820 },
+        html2canvas: { scale: 2, useCORS: true, windowWidth: 794, scrollX: 0, scrollY: 0 },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       })
-      .from(doc.body)
-      .save();
+      .from(iframes[0].contentDocument.querySelector('.jgc-invoice'))
+      .toPdf();
+    for (const iframe of iframes.slice(1)) {
+      worker = worker
+        .get('pdf')
+        .then((pdf) => pdf.addPage())
+        .from(iframe.contentDocument.querySelector('.jgc-invoice'))
+        .toContainer()
+        .toCanvas()
+        .toPdf();
+    }
+    await worker.save();
   } finally {
-    document.body.removeChild(iframe);
+    for (const iframe of iframes) document.body.removeChild(iframe);
   }
 }
 
@@ -375,7 +467,7 @@ function validateInvoiceForm(form, draftItems) {
     if (!isNonEmpty(form.amountPaidNow) || !Number.isFinite(paid) || paid <= 0) {
       errors.amountPaidNow = 'Enter the amount the client is paying now.';
     } else if (paid > total) {
-      errors.amountPaidNow = `Amount cannot exceed the invoice total of ${formatInvoiceMoney(total)}.`;
+      errors.amountPaidNow = `Amount cannot exceed the invoice total of ${formatInvoiceMoney(total, form.currency)}.`;
     }
   }
   if (isNonEmpty(form.nextPaymentDate)) {
@@ -400,7 +492,7 @@ export default function InvoicesPage({ initialAction }) {
   const [isModalOpen, setIsModalOpen] = useState(initialAction === 'add');
   const [modalMode, setModalMode] = useState(initialAction === 'add' ? 'create' : null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [createForm, setCreateForm] = useState({ clientId: '', createdDate: todayISO(), dueDate: '', itemId: '', quantity: '1', discountPercent: '0', taxRate: '0', payNow: false, amountPaidNow: '', paymentMode: paymentModes[0], nextPaymentDate: '' });
+  const [createForm, setCreateForm] = useState({ clientId: '', createdDate: todayISO(), dueDate: '', itemId: '', quantity: '1', discountPercent: '0', taxRate: '0', currency: baseCurrency(), exchangeRate: '1', payNow: false, amountPaidNow: '', paymentMode: paymentModes[0], nextPaymentDate: '' });
   const [draftItems, setDraftItems] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [createErrors, setCreateErrors] = useState({});
@@ -451,9 +543,15 @@ export default function InvoicesPage({ initialAction }) {
     ];
   }, [invoices]);
 
+  // Inventory prices are in the base currency; convert them at the invoice's rate.
+  const draftRate = Number(createForm.exchangeRate) > 0 ? Number(createForm.exchangeRate) : 1;
+  const pricedItems = useMemo(
+    () => draftItems.map((line) => ({ ...line, price: round2(line.basePrice * draftRate) })),
+    [draftItems, draftRate],
+  );
   const draftTotals = useMemo(
-    () => computeTotals(draftItems, createForm.discountPercent, createForm.taxRate),
-    [draftItems, createForm.discountPercent, createForm.taxRate],
+    () => computeTotals(pricedItems, createForm.discountPercent, createForm.taxRate),
+    [pricedItems, createForm.discountPercent, createForm.taxRate],
   );
 
   // Client-portal reminders: unpaid balances that are overdue or due within 3 days.
@@ -471,7 +569,8 @@ export default function InvoicesPage({ initialAction }) {
       const due = new Date(inv.dueDate);
       return due >= today && due < soon;
     });
-    const sum = (rows) => rows.reduce((total, inv) => total + invoiceBalance(inv), 0);
+    // Invoices can be in different currencies, so totals are shown in the base currency.
+    const sum = (rows) => rows.reduce((total, inv) => total + toBase(invoiceBalance(inv), inv.exchangeRate), 0);
     const out = [];
     if (overdue.length > 0 && !dismissedReminders.has('overdue')) {
       out.push({
@@ -513,6 +612,8 @@ export default function InvoicesPage({ initialAction }) {
       quantity: '1',
       discountPercent: String(firstClient?.discountPercent ?? 0),
       taxRate: String(firstClient?.taxRate ?? 0),
+      currency: firstClient?.currency || baseCurrency(),
+      exchangeRate: String(currencyRate(firstClient?.currency || baseCurrency())),
       payNow: false,
       amountPaidNow: '',
       paymentMode: paymentModes[0],
@@ -546,7 +647,7 @@ export default function InvoicesPage({ initialAction }) {
   }
 
   async function handleCreateInvoice() {
-    const validationErrors = validateInvoiceForm(createForm, draftItems);
+    const validationErrors = validateInvoiceForm(createForm, pricedItems);
     if (Object.keys(validationErrors).length > 0) {
       setCreateErrors(validationErrors);
       if (validationErrors.items) {
@@ -563,7 +664,9 @@ export default function InvoicesPage({ initialAction }) {
         dueDate: createForm.dueDate,
         discountPercent: Number(createForm.discountPercent) || 0,
         taxRate: Number(createForm.taxRate) || 0,
-        items: draftItems.map((item) => ({ item: item.itemId, name: item.name, quantity: item.quantity, price: item.price })),
+        currency: createForm.currency,
+        exchangeRate: draftRate,
+        items: pricedItems.map((item) => ({ item: item.itemId, name: item.name, quantity: item.quantity, price: item.price })),
         ...(paidNow > 0 ? { initialPayment: { amount: paidNow, mode: createForm.paymentMode } } : {}),
         ...(createForm.nextPaymentDate && paidNow < draftTotals.total ? { nextPaymentDate: createForm.nextPaymentDate } : {}),
       });
@@ -597,6 +700,20 @@ export default function InvoicesPage({ initialAction }) {
     }
   }
 
+  // Download pulls this invoice's payments so the PDF has one page per payment.
+  async function handleDownload(invoice) {
+    let invoicePayments = [];
+    try {
+      const all = await paymentsApi.list();
+      invoicePayments = all.filter(
+        (p) => (typeof p.invoice === 'object' ? p.invoice?.id : p.invoice) === invoice.id
+      );
+    } catch {
+      // Without the payment list, fall back to the single-page invoice.
+    }
+    await downloadInvoice(invoice, clients.find((c) => c.id === invoice.client), invoicePayments);
+  }
+
   async function markPaid(invoice) {
     try {
       const updated = await invoicesApi.setStatus(invoice.id, 'paid');
@@ -616,6 +733,12 @@ export default function InvoicesPage({ initialAction }) {
         const client = clients.find((c) => c.id === value);
         next.discountPercent = String(client?.discountPercent ?? 0);
         next.taxRate = String(client?.taxRate ?? 0);
+        // ...and their billing currency (rate = units of it per 1 base currency).
+        next.currency = client?.currency || baseCurrency();
+        next.exchangeRate = String(currencyRate(next.currency));
+      }
+      if (name === 'currency') {
+        next.exchangeRate = String(currencyRate(value));
       }
       return next;
     });
@@ -660,7 +783,7 @@ export default function InvoicesPage({ initialAction }) {
         itemId: item.id,
         name: item.name,
         quantity,
-        price: item.price,
+        basePrice: item.price,
       },
     ]);
     setCreateForm((current) => ({ ...current, quantity: '1' }));
@@ -797,34 +920,43 @@ export default function InvoicesPage({ initialAction }) {
                         <td>{invoice.clientName}</td>
                         <td>{formatDate(invoice.createdDate)}</td>
                         <td>{formatDate(invoice.dueDate)}</td>
-                        <td className="invoice-amount">{formatInvoiceMoney(invoice.amount)}</td>
+                        <td className="invoice-amount">{formatInvoiceMoney(invoice.amount, invoice.currency)}</td>
                         <td>
                           <span className={`invoice-pill invoice-pill--${invoice.status}`}>{STATUS_LABEL[invoice.status] || invoice.status}</span>
                           {invoice.status === 'partial' ? (
                             <span className="invoice-balance-note">
-                              {formatInvoiceMoney(invoiceBalance(invoice))} due
+                              {formatInvoiceMoney(invoiceBalance(invoice), invoice.currency)} due
                               {invoice.nextPaymentDate ? ` · next: ${formatDate(invoice.nextPaymentDate)}` : ''}
+                            </span>
+                          ) : invoice.status === 'overdue' && invoiceBalance(invoice) > 0 ? (
+                            <span className="invoice-balance-note invoice-balance-note--overdue">
+                              {formatInvoiceMoney(invoiceBalance(invoice), invoice.currency)} overdue
+                              {overdueDays(invoice) > 0
+                                ? ` · ${overdueDays(invoice)} day${overdueDays(invoice) === 1 ? '' : 's'} late`
+                                : ''}
                             </span>
                           ) : null}
                         </td>
                         <td>
                           <div className="invoice-actions">
-                            {invoice.status !== 'paid' ? (
-                              can('invoices', 'edit') ? (
-                                <button type="button" className="invoice-view-button" onClick={() => markPaid(invoice)}>
-                                  Mark Paid
-                                </button>
-                              ) : null
-                            ) : (
+                            {invoice.status !== 'paid' && invoice.status !== 'cancelled' && can('invoices', 'edit') ? (
+                              <button type="button" className="invoice-view-button" onClick={() => markPaid(invoice)}>
+                                Mark Paid
+                              </button>
+                            ) : null}
+                            {/* Download is available at any payment stage; a part-paid invoice's
+                                PDF shows the amount paid and the balance still due. */}
+                            {invoice.status !== 'cancelled' ? (
                               <button
                                 type="button"
                                 className="invoice-icon-action"
                                 aria-label={`Download ${invoice.invoiceNumber || invoice.id}`}
-                                onClick={() => downloadInvoice(invoice, clients.find((c) => c.id === invoice.client))}
+                                title="Download invoice"
+                                onClick={() => handleDownload(invoice)}
                               >
                                 <img src={invoiceDownloadIconSrc} alt="" aria-hidden="true" />
                               </button>
-                            )}
+                            ) : null}
                             <button type="button" className="invoice-view-button" onClick={() => openViewModal(invoice)}>
                               View
                             </button>
@@ -935,7 +1067,7 @@ export default function InvoicesPage({ initialAction }) {
                         <option value="" disabled></option>
                         {catalog.map((item) => (
                           <option key={item.id} value={item.id}>
-                            {item.name} _$ {item.price}(Stock:{item.stock})
+                            {item.name} · {formatMoney(item.price)} (Stock: {item.stock})
                           </option>
                         ))}
                       </select>
@@ -980,12 +1112,12 @@ export default function InvoicesPage({ initialAction }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {draftItems.map((item) => (
+                        {pricedItems.map((item) => (
                           <tr key={item.id}>
                             <td>{item.name}</td>
                             <td>{item.quantity}</td>
-                            <td>{formatInvoiceMoney(item.price)}</td>
-                            <td>{formatInvoiceMoney(item.price * item.quantity)}</td>
+                            <td>{formatInvoiceMoney(item.price, createForm.currency)}</td>
+                            <td>{formatInvoiceMoney(item.price * item.quantity, createForm.currency)}</td>
                             <td>
                               <button
                                 type="button"
@@ -1032,38 +1164,69 @@ export default function InvoicesPage({ initialAction }) {
                         />
                         {createErrors.taxRate ? <span className="field-error">{createErrors.taxRate}</span> : null}
                       </label>
+                      <label className="invoice-field">
+                        <span>Currency</span>
+                        <div className="invoice-select">
+                          <select name="currency" value={createForm.currency} onChange={handleCreateFieldChange}>
+                            {getCurrencySettings().currencies.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.code} · {c.name}
+                              </option>
+                            ))}
+                          </select>
+                          <img src={invoiceModalChevronIconSrc} alt="" aria-hidden="true" className="invoice-select__chevron" />
+                        </div>
+                      </label>
+                      {createForm.currency !== baseCurrency() ? (
+                        <label className="invoice-field">
+                          <span>Rate (1 {baseCurrency()} = ? {createForm.currency})</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            name="exchangeRate"
+                            value={createForm.exchangeRate}
+                            onChange={handleCreateFieldChange}
+                          />
+                        </label>
+                      ) : null}
                     </div>
+                    {createForm.currency !== baseCurrency() ? (
+                      <p className="invoice-currency-note">
+                        Item prices are converted from {baseCurrency()} at this rate. The rate is saved on the invoice and will not change later.
+                      </p>
+                    ) : null}
 
                     <div className="invoice-totals">
                       <div className="invoice-totals__row">
                         <span>Subtotal</span>
-                        <span>{formatInvoiceMoney(draftTotals.subtotal)}</span>
+                        <span>{formatInvoiceMoney(draftTotals.subtotal, createForm.currency)}</span>
                       </div>
                       {draftTotals.discountAmount > 0 ? (
                         <div className="invoice-totals__row">
                           <span>Discount ({Number(createForm.discountPercent) || 0}%)</span>
-                          <span>-{formatInvoiceMoney(draftTotals.discountAmount)}</span>
+                          <span>-{formatInvoiceMoney(draftTotals.discountAmount, createForm.currency)}</span>
                         </div>
                       ) : null}
                       {draftTotals.taxAmount > 0 ? (
                         <div className="invoice-totals__row">
-                          <span>Tax ({Number(createForm.taxRate) || 0}% on {formatInvoiceMoney(draftTotals.taxable)})</span>
-                          <span>{formatInvoiceMoney(draftTotals.taxAmount)}</span>
+                          <span>Tax ({Number(createForm.taxRate) || 0}% on {formatInvoiceMoney(draftTotals.taxable, createForm.currency)})</span>
+                          <span>{formatInvoiceMoney(draftTotals.taxAmount, createForm.currency)}</span>
                         </div>
                       ) : null}
                       <div className="invoice-totals__total">
                         <span>Total:</span>
-                        <strong>{formatInvoiceMoney(draftTotals.total)}</strong>
+                        <strong>{formatInvoiceMoney(draftTotals.total, createForm.currency)}</strong>
                       </div>
                       {createForm.payNow && Number(createForm.amountPaidNow) > 0 ? (
                         <>
                           <div className="invoice-totals__row">
                             <span>Paying Now</span>
-                            <span>-{formatInvoiceMoney(Number(createForm.amountPaidNow))}</span>
+                            <span>-{formatInvoiceMoney(Number(createForm.amountPaidNow), createForm.currency)}</span>
                           </div>
                           <div className="invoice-totals__total">
                             <span>Balance Due:</span>
-                            <strong>{formatInvoiceMoney(Math.max(0, round2(draftTotals.total - Number(createForm.amountPaidNow))))}</strong>
+                            <strong>{formatInvoiceMoney(Math.max(0, round2(draftTotals.total - Number(createForm.amountPaidNow))), createForm.currency)}</strong>
                           </div>
                         </>
                       ) : null}
@@ -1091,7 +1254,7 @@ export default function InvoicesPage({ initialAction }) {
                 {createForm.payNow ? (
                   <div className="invoice-pricing">
                     <label className="invoice-field">
-                      <span>Amount Received ($)</span>
+                      <span>Amount Received ({createForm.currency})</span>
                       <input
                         type="number"
                         min="0"
@@ -1217,10 +1380,10 @@ export default function InvoicesPage({ initialAction }) {
                         <div className="invoice-detail__item-info">
                           <strong>{item.name}</strong>
                           <span>
-                            {item.quantity} x {formatInvoiceMoney(item.price)}
+                            {item.quantity} x {formatInvoiceMoney(item.price, selectedInvoice.currency)}
                           </span>
                         </div>
-                        <strong>{formatInvoiceMoney(item.quantity * item.price)}</strong>
+                        <strong>{formatInvoiceMoney(item.quantity * item.price, selectedInvoice.currency)}</strong>
                       </div>
                     ))}
                   </div>
@@ -1230,34 +1393,34 @@ export default function InvoicesPage({ initialAction }) {
                   {(Number(selectedInvoice.discountAmount) > 0 || Number(selectedInvoice.taxAmount) > 0) ? (
                     <div className="invoice-totals__row">
                       <span>Subtotal</span>
-                      <span>{formatInvoiceMoney(selectedInvoice.subtotal ?? selectedInvoice.amount)}</span>
+                      <span>{formatInvoiceMoney(selectedInvoice.subtotal ?? selectedInvoice.amount, selectedInvoice.currency)}</span>
                     </div>
                   ) : null}
                   {Number(selectedInvoice.discountAmount) > 0 ? (
                     <div className="invoice-totals__row">
                       <span>Discount ({selectedInvoice.discountPercent}%)</span>
-                      <span>-{formatInvoiceMoney(selectedInvoice.discountAmount)}</span>
+                      <span>-{formatInvoiceMoney(selectedInvoice.discountAmount, selectedInvoice.currency)}</span>
                     </div>
                   ) : null}
                   {Number(selectedInvoice.taxAmount) > 0 ? (
                     <div className="invoice-totals__row">
                       <span>Tax ({selectedInvoice.taxRate}%)</span>
-                      <span>{formatInvoiceMoney(selectedInvoice.taxAmount)}</span>
+                      <span>{formatInvoiceMoney(selectedInvoice.taxAmount, selectedInvoice.currency)}</span>
                     </div>
                   ) : null}
                   <div className="invoice-detail__total">
                     <span>Total:</span>
-                    <strong>{formatInvoiceMoney(selectedInvoice.amount)}</strong>
+                    <strong>{formatInvoiceMoney(selectedInvoice.amount, selectedInvoice.currency)}</strong>
                   </div>
                   {Number(selectedInvoice.amountPaid) > 0 ? (
                     <>
                       <div className="invoice-totals__row">
                         <span>Paid</span>
-                        <span>{formatInvoiceMoney(selectedInvoice.amountPaid)}</span>
+                        <span>{formatInvoiceMoney(selectedInvoice.amountPaid, selectedInvoice.currency)}</span>
                       </div>
                       <div className="invoice-detail__total invoice-detail__total--balance">
                         <span>Balance Due:</span>
-                        <strong>{formatInvoiceMoney(invoiceBalance(selectedInvoice))}</strong>
+                        <strong>{formatInvoiceMoney(invoiceBalance(selectedInvoice), selectedInvoice.currency)}</strong>
                       </div>
                     </>
                   ) : null}
@@ -1292,12 +1455,6 @@ export default function InvoicesPage({ initialAction }) {
   );
 }
 
-function formatInvoiceMoney(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }).format(value || 0);
+function formatInvoiceMoney(value, currencyCode) {
+  return formatMoney(value, currencyCode);
 }
