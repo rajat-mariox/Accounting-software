@@ -291,3 +291,105 @@
 .payment-summary strong:last-child {
   color: #ef4444;
 }
+
+/* Supplier invoice attachment on Record Supply */
+.supply-attachment__drop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 12px 16px;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.supply-attachment__drop:hover {
+  border-color: var(--ds-brand, #1d4ed8);
+  color: var(--ds-brand, #1d4ed8);
+}
+
+.supply-attachment__drop input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.supply-attachment {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+
+.supply-attachment__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.supply-attachment__size {
+  color: #64748b;
+}
+
+.supply-attachment__remove {
+  border: 0;
+  background: none;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Picker text is a <span> inside .client-field, so override the bold label style. */
+.client-field .supply-attachment__drop span {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.client-field .supply-attachment__drop:hover span {
+  color: var(--ds-brand, #1d4ed8);
+}
+
+.client-field .supply-attachment__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.client-field .supply-attachment__size {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
+}
+
+/* Long supply forms scroll; keep Cancel / Record buttons pinned to the bottom. */
+.client-modal--supply .client-form {
+  padding-bottom: 0;
+}
+
+.client-modal--supply .client-form__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 0 -22px;
+  padding: 14px 22px 18px;
+  background: #fff;
+  border-top: 1px solid #eef2f7;
+}

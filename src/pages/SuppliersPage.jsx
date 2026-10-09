@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import DashboardSidebar from '../components/dashboard/DashboardSidebar';
 import DashboardTopbar from '../components/dashboard/DashboardTopbar';
-import { CheckCircleIcon, CloseIcon, PlusIcon, TrashIcon } from '../components/dashboard/icons';
+import { CheckCircleIcon, CloseIcon, PlusIcon, TrashIcon, ViewIcon } from '../components/dashboard/icons';
 import { sidebarItems } from '../data/dashboard';
 import { suppliersApi } from '../api';
+import AttachmentPicker from '../components/AttachmentPicker';
+import SupplierPaymentModal from '../components/SupplierPaymentModal';
+import { attachmentHandlers, openBlobInNewTab, toAttachmentPayload } from '../utils/attachments';
 import { formatCurrency } from '../utils/formatters';
+import { baseCurrency, formatDisplayDate, formatMoney, getCurrencySettings } from '../utils/currency';
 import {
   isNonEmpty,
   isPositiveInteger,
@@ -41,13 +45,8 @@ const emptyActivityForm = {
   date: '',
   amountPaid: '',
   nextPaymentDate: '',
-};
-
-const emptyInstallmentForm = {
-  amount: '',
-  date: '',
-  reference: '',
-  nextPaymentDate: '',
+  attachment: null,
+  currency: '',
 };
 
 const PAYMENT_STATUS_LABEL = {
@@ -115,27 +114,8 @@ function validateActivityForm(form) {
   return errors;
 }
 
-function validateInstallmentForm(form, activity) {
-  const errors = {};
-  const balance = activityBalance(activity);
-  if (!isPositiveNumber(form.amount)) {
-    errors.amount = 'Amount must be greater than 0.';
-  } else if (Number(form.amount) > balance + 0.005) {
-    errors.amount = `Cannot exceed the remaining balance of ${formatCurrency(balance)}.`;
-  }
-  if (isNonEmpty(form.date) && !isValidISODate(form.date)) errors.date = 'Select a valid date.';
-  const remaining = balance - (Number(form.amount) || 0);
-  if (remaining > 0.005 && !isValidISODate(form.nextPaymentDate)) {
-    errors.nextPaymentDate = 'Select when the remaining amount will be paid.';
-  }
-  return errors;
-}
-
 function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString().slice(0, 10);
+  return formatDisplayDate(value);
 }
 
 export default function SuppliersPage() {
@@ -153,8 +133,6 @@ export default function SuppliersPage() {
   const [errors, setErrors] = useState({});
   const [activityErrors, setActivityErrors] = useState({});
   const [payingActivity, setPayingActivity] = useState(null);
-  const [installmentForm, setInstallmentForm] = useState(emptyInstallmentForm);
-  const [installmentErrors, setInstallmentErrors] = useState({});
   const [toast, setToast] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -269,6 +247,14 @@ export default function SuppliersPage() {
     }
   }
 
+  const activityFile = attachmentHandlers(setActivityForm, setActivityErrors);
+
+  function openAttachment(row) {
+    openBlobInNewTab(() => suppliersApi.fetchActivityAttachment(row.id)).catch((err) =>
+      setToast(err.message || 'Could not open the attached invoice'),
+    );
+  }
+
   async function handleRecordSubmit(event) {
     event.preventDefault();
     const validationErrors = validateActivityForm(activityForm);
@@ -285,9 +271,11 @@ export default function SuppliersPage() {
         pricePerUnit: Number(activityForm.pricePerUnit),
         date: activityForm.date,
         invoiceNumber: activityForm.invoice || undefined,
+        currency: activityForm.currency || baseCurrency(),
         amountPaid: activityForm.amountPaid === '' ? 0 : Number(activityForm.amountPaid),
         nextPaymentDate: activityForm.nextPaymentDate || undefined,
       };
+      payload.attachment = await toAttachmentPayload(activityForm.attachment);
       const created = await suppliersApi.createActivity(payload);
       setActivities((current) => [created, ...current]);
       // refresh supplier aggregates
@@ -308,64 +296,15 @@ export default function SuppliersPage() {
     }
   }
 
-  function openInstallment(row) {
-    setPayingActivity(row);
-    setInstallmentForm({
-      ...emptyInstallmentForm,
-      amount: String(activityBalance(row)),
-      date: new Date().toISOString().slice(0, 10),
-    });
-    setInstallmentErrors({});
-  }
-
-  function closeInstallment() {
+  function handleInstallmentSaved(updated) {
+    setActivities((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+    suppliersApi.list().then(setSuppliers).catch(() => {});
     setPayingActivity(null);
-    setInstallmentErrors({});
-  }
-
-  function handleInstallmentChange(event) {
-    const { name, value } = event.target;
-    setInstallmentForm((current) => ({ ...current, [name]: value }));
-    setInstallmentErrors((current) => {
-      if (!current[name]) return current;
-      const next = { ...current };
-      delete next[name];
-      return next;
-    });
-  }
-
-  async function handleInstallmentSubmit(event) {
-    event.preventDefault();
-    const validationErrors = validateInstallmentForm(installmentForm, payingActivity);
-    if (Object.keys(validationErrors).length > 0) {
-      setInstallmentErrors(validationErrors);
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const updated = await suppliersApi.recordActivityPayment(payingActivity.id, {
-        amount: Number(installmentForm.amount),
-        date: installmentForm.date || undefined,
-        reference: installmentForm.reference || undefined,
-        nextPaymentDate: installmentForm.nextPaymentDate || undefined,
-      });
-      setActivities((current) => current.map((row) => (row.id === updated.id ? updated : row)));
-      try {
-        setSuppliers(await suppliersApi.list());
-      } catch {
-        // ignore
-      }
-      closeInstallment();
-      setToast(
-        activityBalance(updated) > 0
-          ? `Payment recorded — ${formatCurrency(activityBalance(updated))} remaining`
-          : 'Payment recorded — supplier fully paid',
-      );
-    } catch (err) {
-      setInstallmentErrors({ form: err.message || 'Could not record payment' });
-    } finally {
-      setSubmitting(false);
-    }
+    setToast(
+      activityBalance(updated) > 0
+        ? `Payment recorded — ${formatCurrency(activityBalance(updated), updated.currency)} remaining`
+        : 'Payment recorded — supplier fully paid',
+    );
   }
 
   function openAdd() {
@@ -464,7 +403,7 @@ export default function SuppliersPage() {
             ) : activeTab === 'suppliers' ? (
               <SuppliersTable rows={suppliers} onEdit={openEdit} onDelete={openDelete} />
             ) : (
-              <SupplyActivitiesTable rows={activities} onPay={openInstallment} />
+              <SupplyActivitiesTable rows={activities} onPay={setPayingActivity} onViewAttachment={openAttachment} />
             )}
           </section>
         </div>
@@ -492,14 +431,10 @@ export default function SuppliersPage() {
         ) : null}
 
         {payingActivity ? (
-          <InstallmentModal
+          <SupplierPaymentModal
             activity={payingActivity}
-            form={installmentForm}
-            errors={installmentErrors}
-            onChange={handleInstallmentChange}
-            onCancel={closeInstallment}
-            onSubmit={handleInstallmentSubmit}
-            submitting={submitting}
+            onCancel={() => setPayingActivity(null)}
+            onSaved={handleInstallmentSaved}
           />
         ) : null}
 
@@ -509,6 +444,8 @@ export default function SuppliersPage() {
             errors={activityErrors}
             suppliers={suppliers}
             onChange={handleActivityChange}
+            onFileChange={activityFile.onFileChange}
+            onFileClear={activityFile.onFileClear}
             onCancel={closeRecord}
             onSubmit={handleRecordSubmit}
             submitting={submitting}
@@ -663,7 +600,7 @@ function DeleteSupplierDialog({ supplier, onCancel, onDelete, submitting }) {
   );
 }
 
-function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onCancel, onSubmit, submitting }) {
+function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onFileChange, onFileClear, onCancel, onSubmit, submitting }) {
   const quantity = Number(form.quantity) || 0;
   const pricePerUnit = Number(form.pricePerUnit) || 0;
   const total = quantity * pricePerUnit;
@@ -673,7 +610,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onCancel, o
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <section
-        className="client-modal"
+        className="client-modal client-modal--supply"
         role="dialog"
         aria-modal="true"
         aria-labelledby="record-supply-title"
@@ -764,6 +701,28 @@ function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onCancel, o
           </label>
 
           <label className="client-field">
+            <span>Currency</span>
+            <select name="currency" value={form.currency || baseCurrency()} onChange={onChange}>
+              {getCurrencySettings().currencies.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} · {c.name}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">Price, total and every payment for this supply are in this currency.</span>
+          </label>
+
+          <AttachmentPicker
+            label="Attach Supplier Invoice"
+            prompt="Click to attach the invoice the supplier gave you"
+            file={form.attachment}
+            error={errors.attachment}
+            onFileChange={onFileChange}
+            onFileClear={onFileClear}
+            disabled={submitting}
+          />
+
+          <label className="client-field">
             <span>Date<span className="client-field__required">*</span></span>
             <input
               name="date"
@@ -778,7 +737,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onCancel, o
 
           <div className="record-total">
             <span>Total Amount:</span>
-            <strong>{formatCurrency(total)}</strong>
+            <strong>{formatCurrency(total, form.currency || baseCurrency())}</strong>
           </div>
 
           <label className="client-field">
@@ -799,7 +758,7 @@ function RecordSupplyModal({ form, errors = {}, suppliers, onChange, onCancel, o
 
           <div className={`record-total record-total--${remaining > 0 ? 'due' : 'clear'}`}>
             <span>Remaining Balance:</span>
-            <strong>{formatCurrency(remaining)}</strong>
+            <strong>{formatCurrency(remaining, form.currency || baseCurrency())}</strong>
           </div>
 
           {remaining > 0 ? (
@@ -866,12 +825,12 @@ function SuppliersTable({ rows, onEdit, onDelete }) {
                 <td>
                   <div className="suppliers-activity-summary">
                     <strong>{row.activities ?? 0} supplies</strong>
-                    <span>{formatCurrency(row.total ?? 0)} total</span>
+                    <span>{formatCurrency(row.total ?? 0)} total ({baseCurrency()})</span>
                   </div>
                 </td>
                 <td>
                   <strong className={row.outstanding > 0 ? 'suppliers-owed' : 'suppliers-muted'}>
-                    {formatCurrency(row.outstanding ?? 0)}
+                    {formatCurrency(row.outstanding ?? 0)} <span className="suppliers-muted">{baseCurrency()}</span>
                   </strong>
                 </td>
                 <td>
@@ -901,7 +860,7 @@ function SuppliersTable({ rows, onEdit, onDelete }) {
   );
 }
 
-function SupplyActivitiesTable({ rows, onPay }) {
+function SupplyActivitiesTable({ rows, onPay, onViewAttachment }) {
   return (
     <div className="table-wrap">
       <table className="suppliers-table suppliers-table--activities">
@@ -934,17 +893,32 @@ function SupplyActivitiesTable({ rows, onPay }) {
                     <strong>{row.supplierName || row.supplier}</strong>
                   </td>
                   <td className="suppliers-muted">{row.item}</td>
-                  <td className="suppliers-muted">{row.quantity} × {formatUnitPrice(row.pricePerUnit)}</td>
-                  <td className="suppliers-total">{formatCurrency(row.totalAmount)}</td>
-                  <td className="suppliers-muted">{formatCurrency(row.amountPaid || 0)}</td>
-                  <td className={balance > 0 ? 'suppliers-owed' : 'suppliers-muted'}>{formatCurrency(balance)}</td>
+                  <td className="suppliers-muted">{row.quantity} × {formatUnitPrice(row.pricePerUnit, row.currency)}</td>
+                  <td className="suppliers-total">{formatCurrency(row.totalAmount, row.currency)}</td>
+                  <td className="suppliers-muted">{formatCurrency(row.amountPaid || 0, row.currency)}</td>
+                  <td className={balance > 0 ? 'suppliers-owed' : 'suppliers-muted'}>{formatCurrency(balance, row.currency)}</td>
                   <td className={status === 'overdue' ? 'suppliers-owed' : 'suppliers-muted'}>
                     {balance > 0 ? formatDate(row.nextPaymentDate) || '—' : '—'}
                   </td>
                   <td>
                     <span className={`pill pill--${status}`}>{PAYMENT_STATUS_LABEL[status] || status}</span>
                   </td>
-                  <td className="suppliers-muted">{row.invoiceNumber || (row.id || '').toString().slice(-6).toUpperCase()}</td>
+                  <td className="suppliers-muted">
+                    <span className="attachment-inline">
+                      {row.invoiceNumber || (row.id || '').toString().slice(-6).toUpperCase()}
+                      {row.attachment?.name && onViewAttachment ? (
+                        <button
+                          type="button"
+                          className="attachment-view-button"
+                          onClick={() => onViewAttachment(row)}
+                          title={`View attached invoice: ${row.attachment.name}`}
+                          aria-label={`View attached invoice ${row.attachment.name}`}
+                        >
+                          <ViewIcon />
+                        </button>
+                      ) : null}
+                    </span>
+                  </td>
                   <td>
                     {balance > 0 && onPay ? (
                       <div className="row-actions">
@@ -964,108 +938,6 @@ function SupplyActivitiesTable({ rows, onPay }) {
   );
 }
 
-function InstallmentModal({ activity, form, errors = {}, onChange, onCancel, onSubmit, submitting }) {
-  const balance = activityBalance(activity);
-  const remainingAfter = Math.max(0, balance - (Number(form.amount) || 0));
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
-      <section
-        className="client-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="installment-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="client-modal__header">
-          <h2 id="installment-title">Add Supplier Payment</h2>
-          <button type="button" className="modal-close" onClick={onCancel} aria-label="Close modal">
-            <CloseIcon />
-          </button>
-        </div>
-
-        <form className="client-form" onSubmit={onSubmit} noValidate>
-          <div className="payment-summary">
-            <span><strong>{activity.supplierName}</strong> · {activity.item} × {activity.quantity}</span>
-            <span>Total {formatCurrency(activity.totalAmount)} · Paid {formatCurrency(activity.amountPaid || 0)}</span>
-            <strong>Remaining {formatCurrency(balance)}</strong>
-          </div>
-
-          <label className="client-field">
-            <span>Amount Paying Now<span className="client-field__required">*</span></span>
-            <input
-              name="amount"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={form.amount}
-              onChange={onChange}
-              aria-invalid={Boolean(errors.amount)}
-              className={errors.amount ? 'field-input--invalid' : ''}
-            />
-            {errors.amount ? <span className="field-error">{errors.amount}</span> : null}
-          </label>
-
-          <label className="client-field">
-            <span>Payment Date</span>
-            <input
-              name="date"
-              type="date"
-              value={form.date}
-              onChange={onChange}
-              aria-invalid={Boolean(errors.date)}
-              className={errors.date ? 'field-input--invalid' : ''}
-            />
-            {errors.date ? <span className="field-error">{errors.date}</span> : null}
-          </label>
-
-          <label className="client-field">
-            <span>Reference</span>
-            <input name="reference" type="text" placeholder="Transaction / cheque no." value={form.reference} onChange={onChange} />
-          </label>
-
-          <div className={`record-total record-total--${remainingAfter > 0 ? 'due' : 'clear'}`}>
-            <span>Remaining After This Payment:</span>
-            <strong>{formatCurrency(remainingAfter)}</strong>
-          </div>
-
-          {remainingAfter > 0 ? (
-            <label className="client-field">
-              <span>Next Payment Date<span className="client-field__required">*</span></span>
-              <input
-                name="nextPaymentDate"
-                type="date"
-                value={form.nextPaymentDate}
-                onChange={onChange}
-                aria-invalid={Boolean(errors.nextPaymentDate)}
-                className={errors.nextPaymentDate ? 'field-input--invalid' : ''}
-              />
-              {errors.nextPaymentDate ? <span className="field-error">{errors.nextPaymentDate}</span> : null}
-              <span className="field-hint">You will be reminded 3 days before this date.</span>
-            </label>
-          ) : null}
-
-          {errors.form ? <span className="field-error">{errors.form}</span> : null}
-
-          <div className="client-form__actions">
-            <button type="button" className="modal-text-button" onClick={onCancel} disabled={submitting}>
-              Cancel
-            </button>
-            <button type="submit" className="modal-primary-button" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Record Payment'}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  );
-}
-
-function formatUnitPrice(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }).format(value);
+function formatUnitPrice(value, currencyCode) {
+  return formatMoney(value, currencyCode);
 }

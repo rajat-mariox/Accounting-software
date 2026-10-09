@@ -22,6 +22,7 @@ import { isNonEmpty, isValidEmail, isValidPhone, sanitizePhoneInput } from '../u
 import useDebouncedValue from '../utils/useDebouncedValue';
 import '../styles/clients.css';
 import '../styles/dashboard.css';
+import { baseCurrency, formatDisplayDate, getCurrencySettings } from '../utils/currency';
 import '../styles/form-errors.css';
 
 const emptyForm = {
@@ -33,6 +34,7 @@ const emptyForm = {
   address: '',
   discountPercent: '0',
   taxRate: '0',
+  currency: '',
 };
 
 const MIN_PASSWORD = 6;
@@ -77,10 +79,7 @@ function validateClientForm(form, mode = 'add') {
 }
 
 function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString().slice(0, 10);
+  return formatDisplayDate(value);
 }
 
 export default function ClientsPage({ initialAction }) {
@@ -159,6 +158,7 @@ export default function ClientsPage({ initialAction }) {
       address: client.address || '',
       discountPercent: String(client.discountPercent ?? 0),
       taxRate: String(client.taxRate ?? 0),
+      currency: client.currency || '',
     });
     setErrors({});
     setModalMode('edit');
@@ -593,6 +593,21 @@ function ClientForm({ form, errors = {}, onChange, onCancel, onSubmit, submitLab
       </div>
       <span className="field-hint">Applied automatically to this client&apos;s new invoices; tax is charged on the discounted amount. Both can be changed per invoice.</span>
 
+      <label className="client-field">
+        <span>Billing Currency</span>
+        <select name="currency" value={form.currency || ''} onChange={onChange}>
+          <option value="">{baseCurrency()} (base currency)</option>
+          {getCurrencySettings()
+            .currencies.filter((c) => c.code !== baseCurrency())
+            .map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code} · {c.name}
+              </option>
+            ))}
+        </select>
+        <span className="field-hint">New invoices for this client are created in this currency. It can be changed per invoice.</span>
+      </label>
+
       {errors.form ? <span className="field-error">{errors.form}</span> : null}
 
       <div className="client-form__actions">
@@ -629,7 +644,7 @@ function ClientDetails({ client }) {
               <span>{formatDate(invoice.createdDate || invoice.date)}</span>
             </div>
             <div className="invoice-history-item__meta">
-              <strong>{formatCurrency(invoice.amount)}</strong>
+              <strong>{formatCurrency(invoice.amount, invoice.currency)}</strong>
               <span className={`pill pill--${invoice.status}`}>{invoice.status}</span>
             </div>
           </div>

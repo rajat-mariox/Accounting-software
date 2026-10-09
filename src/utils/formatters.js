@@ -1,9 +1,7 @@
-export function formatCurrency(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value % 1 === 0 ? 0 : 1,
-    maximumFractionDigits: 1,
-  }).format(value);
-}
+import { formatMoney } from './currency';
 
+// Money in the given currency (defaults to the base currency from
+// Settings -> Currency & Region), always with the configured decimals.
+export function formatCurrency(value, currencyCode) {
+  return formatMoney(value, currencyCode);
+}

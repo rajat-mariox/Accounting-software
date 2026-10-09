@@ -15,6 +15,7 @@ import {
   taxConfigIconSrc,
   usersRolesShieldIconSrc,
 } from '../utils/images';
+import { DATE_FORMATS, DEFAULT_CURRENCY_SETTINGS, formatDisplayDate, setCurrencySettings } from '../utils/currency';
 import '../styles/dashboard.css';
 import '../styles/settings.css';
 import '../styles/form-errors.css';
@@ -47,6 +48,10 @@ export default function SettingsPage() {
   const [toast, setToast] = useState(null);
   const [savingCompany, setSavingCompany] = useState(false);
   const [savingTax, setSavingTax] = useState(false);
+  // Currency & Region: working copy of { base, decimals, dateFormat, currencies[] }.
+  const [currencyForm, setCurrencyForm] = useState(DEFAULT_CURRENCY_SETTINGS);
+  const [currencyError, setCurrencyError] = useState('');
+  const [savingCurrency, setSavingCurrency] = useState(false);
   const [companyErrors, setCompanyErrors] = useState({});
 
   // Inventory categories: `savedCategories` mirrors the server; `categories` is the
@@ -103,6 +108,7 @@ export default function SettingsPage() {
           phone: sanitizePhoneInput(incoming.phone || ''),
         });
         setTax({ ...emptyTax, ...(all.tax || {}) });
+        if (all.currency) setCurrencyForm(all.currency);
         const list = Array.isArray(all.inventory?.categories) && all.inventory.categories.length > 0
           ? all.inventory.categories
           : [DEFAULT_CATEGORY];
@@ -189,6 +195,46 @@ export default function SettingsPage() {
       setLoadError(err.message || 'Could not save tax settings');
     } finally {
       setSavingTax(false);
+    }
+  }
+
+  function updateCurrencyRow(index, field, value) {
+    setCurrencyForm((current) => ({
+      ...current,
+      currencies: current.currencies.map((row, i) => (i === index ? { ...row, [field]: field === 'code' ? value.toUpperCase() : value } : row)),
+    }));
+    setCurrencyError('');
+  }
+
+  function addCurrencyRow() {
+    setCurrencyForm((current) => ({ ...current, currencies: [...current.currencies, { code: '', name: '', symbol: '', rate: '' }] }));
+  }
+
+  function removeCurrencyRow(index) {
+    setCurrencyForm((current) => ({ ...current, currencies: current.currencies.filter((_, i) => i !== index) }));
+    setCurrencyError('');
+  }
+
+  async function saveCurrency() {
+    setSavingCurrency(true);
+    setCurrencyError('');
+    try {
+      const payload = {
+        ...currencyForm,
+        decimals: Number(currencyForm.decimals),
+        currencies: currencyForm.currencies
+          .filter((row) => String(row.code || '').trim())
+          .map((row) => ({ ...row, rate: Number(row.rate) })),
+      };
+      const updated = await settingsApi.update('currency', payload);
+      setCurrencyForm(updated);
+      // Every page re-renders with the new currency and date formats.
+      setCurrencySettings(updated);
+      setToast('Currency settings saved');
+    } catch (err) {
+      setCurrencyError(err.message || 'Could not save currency settings');
+    } finally {
+      setSavingCurrency(false);
     }
   }
 
@@ -628,6 +674,144 @@ export default function SettingsPage() {
                       </button>
                     ) : null}
                   </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === 'currency' ? (
+            <section className="settings-card">
+              <div className="settings-card__header">
+                <div className="settings-card__title">
+                  <div className="settings-card__icon">
+                    <img src={taxConfigIconSrc} alt="" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h2>Currency &amp; Region</h2>
+                    <p>Currencies you bill in, their exchange rates, and how money and dates are shown</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-form">
+                <div className="currency-settings__row">
+                  <label className="settings-field">
+                    <span>Base Currency</span>
+                    <select
+                      value={currencyForm.base}
+                      onChange={(event) => setCurrencyForm((current) => ({ ...current, base: event.target.value }))}
+                      disabled={!can('settings', 'edit')}
+                    >
+                      {currencyForm.currencies.filter((row) => row.code).map((row) => (
+                        <option key={row.code} value={row.code}>
+                          {row.code} · {row.name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="field-hint">Books, dashboard and report totals are kept in this currency. It cannot change once invoices, payments or supplies exist.</span>
+                  </label>
+                  <label className="settings-field">
+                    <span>Decimals</span>
+                    <select
+                      value={currencyForm.decimals}
+                      onChange={(event) => setCurrencyForm((current) => ({ ...current, decimals: Number(event.target.value) }))}
+                      disabled={!can('settings', 'edit')}
+                    >
+                      {[0, 1, 2, 3].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="settings-field">
+                    <span>Date Format</span>
+                    <select
+                      value={currencyForm.dateFormat}
+                      onChange={(event) => setCurrencyForm((current) => ({ ...current, dateFormat: event.target.value }))}
+                      disabled={!can('settings', 'edit')}
+                    >
+                      {DATE_FORMATS.map((f) => (
+                        <option key={f} value={f}>
+                          {f}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="currency-settings__table">
+                  <div className="currency-settings__head">
+                    <span>Code</span>
+                    <span>Name</span>
+                    <span>Symbol</span>
+                    <span>Rate (per 1 {currencyForm.base})</span>
+                    <span />
+                  </div>
+                  {currencyForm.currencies.map((row, index) => {
+                    const isBase = row.code === currencyForm.base;
+                    return (
+                      <div className="currency-settings__line" key={index}>
+                        <input
+                          value={row.code}
+                          maxLength={3}
+                          placeholder="EUR"
+                          onChange={(event) => updateCurrencyRow(index, 'code', event.target.value)}
+                          disabled={!can('settings', 'edit') || isBase}
+                          aria-label="Currency code"
+                        />
+                        <input
+                          value={row.name}
+                          placeholder="Euro"
+                          onChange={(event) => updateCurrencyRow(index, 'name', event.target.value)}
+                          disabled={!can('settings', 'edit')}
+                          aria-label="Currency name"
+                        />
+                        <input
+                          value={row.symbol}
+                          placeholder="€"
+                          onChange={(event) => updateCurrencyRow(index, 'symbol', event.target.value)}
+                          disabled={!can('settings', 'edit')}
+                          aria-label="Currency symbol"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={isBase ? 1 : row.rate}
+                          onChange={(event) => updateCurrencyRow(index, 'rate', event.target.value)}
+                          disabled={!can('settings', 'edit') || isBase}
+                          aria-label="Exchange rate"
+                        />
+                        {can('settings', 'edit') && !isBase ? (
+                          <button type="button" className="currency-settings__remove" onClick={() => removeCurrencyRow(index)}>
+                            Remove
+                          </button>
+                        ) : (
+                          <span className="currency-settings__base">{isBase ? 'Base' : ''}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {can('settings', 'edit') ? (
+                    <button type="button" className="currency-settings__add" onClick={addCurrencyRow}>
+                      + Add currency
+                    </button>
+                  ) : null}
+                </div>
+
+                <p className="currency-settings__note">
+                  Rate = how many units of that currency equal 1 {currencyForm.base}. New invoices and supplies save the rate in use, so changing a rate later never changes old records.
+                </p>
+                <p className="currency-settings__note">
+                  Preview: today is {formatDisplayDate(new Date())} in your current format.
+                </p>
+
+                {currencyError ? <span className="field-error">{currencyError}</span> : null}
+                {can('settings', 'edit') ? (
+                  <button type="button" className="settings-primary-button" onClick={saveCurrency} disabled={savingCurrency}>
+                    {savingCurrency ? 'Saving…' : 'Save Changes'}
+                  </button>
                 ) : null}
               </div>
             </section>

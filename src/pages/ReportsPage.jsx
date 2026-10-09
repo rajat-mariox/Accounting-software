@@ -7,6 +7,7 @@ import { reportsApi, inventoryApi } from '../api';
 import { reportExportIconSrc } from '../utils/images';
 import '../styles/dashboard.css';
 import '../styles/reports.css';
+import { baseCurrency, formatMoney } from '../utils/currency';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -110,7 +111,7 @@ export default function ReportsPage() {
           <div className="reports-header">
             <div className="dashboard-heading">
               <h1>Reports &amp; Analytics</h1>
-              <p>View detailed business insights</p>
+              <p>View detailed business insights · all amounts in {baseCurrency()}</p>
             </div>
 
             <button
@@ -588,23 +589,13 @@ function polarToCartesian(cx, cy, r, angle) {
   };
 }
 
+// Report figures come back from the server already converted to the base currency.
 function formatThousands(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value || 0);
+  return formatMoney(value);
 }
 
 function formatTwoDecimals(value) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }).format(value || 0);
+  return formatMoney(value);
 }
 
 function niceMax(value) {

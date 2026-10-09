@@ -20,3 +20,29 @@
   border-color: #dc2626 !important;
   outline-color: #dc2626;
 }
+
+/* Hints and errors inside form fields must not inherit the bold label style
+   (`.client-field span`), and the hint style has to load on every form page. */
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #6b7280;
+}
+
+.client-field .field-hint,
+.client-field .field-error {
+  margin-top: -2px;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+.client-field .field-hint {
+  color: #6b7280;
+}
+
+.client-field .field-error {
+  color: #dc2626;
+}

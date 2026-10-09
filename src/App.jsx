@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { loadCurrencySettings, useCurrencySettings } from './utils/currency';
+import { getStoredToken } from './utils/auth';
 import ClientsPage from './pages/ClientsPage';
 import DashboardPage from './pages/DashboardPage';
 import InventoryPage from './pages/InventoryPage';
@@ -15,6 +18,16 @@ import PrivateRoute from './components/routes/PrivateRoute';
 import PublicRoute from './components/routes/PublicRoute';
 
 function App() {
+  // Currency & Region settings drive every money/date format; re-render on change.
+  useCurrencySettings();
+  useEffect(() => {
+    if (getStoredToken()) loadCurrencySettings();
+    // After login the token is stored right after the auth event fires.
+    const onAuth = () => window.setTimeout(() => getStoredToken() && loadCurrencySettings(), 0);
+    window.addEventListener('auth-changed', onAuth);
+    return () => window.removeEventListener('auth-changed', onAuth);
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>
