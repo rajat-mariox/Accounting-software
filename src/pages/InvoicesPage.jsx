@@ -159,20 +159,30 @@ function formatDocDate(value) {
 function buildInvoiceHtml(invoice, client, payment) {
   const number = invoice.invoiceNumber || invoice.id;
   const code = invoice.currency || baseCurrency();
-  const formatDocMoney = (value) => formatMoney(value, code);
+  const money = (value) => formatMoney(value, code);
   const items = invoice.items || [];
   const rows = items
     .map(
       (item, index) => `
-      <tr>
-        <td class="c">${index + 1}</td>
-        <td>${escapeHtml(item.name).toUpperCase()}</td>
-        <td class="r">${formatDocMoney(item.price)}</td>
-        <td class="c">${escapeHtml(item.unit || 'Pcs')}</td>
+      <tr class="${index % 2 ? 'alt' : ''}">
+        <td>${escapeHtml(item.name)}</td>
+        <td class="r">${money(item.price)}</td>
         <td class="c">${escapeHtml(item.quantity)}</td>
-        <td class="r">${item.price * item.quantity ? formatDocMoney(item.price * item.quantity) : '-'}</td>
+        <td class="c">${escapeHtml(item.unit || 'Pcs')}</td>
+        <td class="r">${item.price * item.quantity ? money(item.price * item.quantity) : '-'}</td>
       </tr>`,
     )
+    .join('');
+
+  const status = payment
+    ? (payment.balanceAfter > 0.005 ? 'Partially paid' : 'Paid')
+    : STATUS_LABEL[invoice.status] || invoice.status || '';
+  const amountPaid = payment ? round2(payment.paidBefore + Number(payment.amount || 0)) : Number(invoice.amountPaid || 0);
+  const balanceDue = payment ? payment.balanceAfter : Math.max(0, round2(Number(invoice.amount || 0) - amountPaid));
+  const sumRow = (label, value, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="r">${value}</td></tr>`;
+  const billTo = [client?.email, client?.phone, client?.address]
+    .filter(Boolean)
+    .map((line) => `<div>${escapeHtml(line)}</div>`)
     .join('');
 
   return `<!DOCTYPE html>
@@ -186,173 +196,126 @@ function buildInvoiceHtml(invoice, client, payment) {
 <style>
   /* Scoped to .jgc-invoice: the PDF library copies this element into the app page
      before rendering, so styles must travel with it and must not touch the app. */
-  .jgc-invoice { width: 794px; margin: 0; background: #fff; color: #111;
-    font-family: 'Cambria', 'Georgia', 'Times New Roman', serif; font-size: 14px; line-height: 1.35;
+  .jgc-invoice { width: 794px; margin: 0; background: #fff; color: #1b1f2a;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-size: 12.5px; line-height: 1.5;
     -webkit-font-smoothing: antialiased; }
   .jgc-invoice * { box-sizing: border-box; font-family: inherit; }
   .jgc-invoice .page { width: 794px; min-height: 1120px; display: flex; flex-direction: column; }
   .jgc-invoice .banner { display: block; width: 100%; height: auto; }
-  .jgc-invoice .banner--header { margin-bottom: 22px; }
-  .jgc-invoice .content { padding: 0 36px; }
-  .jgc-invoice table.doc { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  .jgc-invoice table.doc td,
-  .jgc-invoice table.doc th { border: 1px solid #111; padding: 6px 10px; font-size: 13.5px;
-    vertical-align: middle; overflow-wrap: anywhere; }
-  .jgc-invoice .label { font-weight: 700; }
-  .jgc-invoice .u { text-decoration: underline; }
-  .jgc-invoice .red { color: #e02020; }
-  .jgc-invoice .title-cell { text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
-  .jgc-invoice .c { text-align: center; }
+  .jgc-invoice .content { padding: 18px 48px 0; }
   .jgc-invoice .r { text-align: right; white-space: nowrap; }
-  .jgc-invoice table.items th { background: #eee; text-align: center; font-size: 12.5px; font-weight: 700; line-height: 1.2; }
-  .jgc-invoice table.items th.desc { font-style: italic; color: #4472c4; font-weight: 600; font-size: 15px; }
-  .jgc-invoice table.doc td.blank { border-top: none; border-bottom: none; }
-  .jgc-invoice table.items th:first-child { white-space: nowrap; }
-  .jgc-invoice .sum-label { text-align: right; font-weight: 600; white-space: nowrap; }
-  .jgc-invoice .total-row td { font-size: 15.5px; font-weight: 700; }
-  .jgc-invoice .words-row td { padding: 12px; text-align: center; font-weight: 700; }
+  .jgc-invoice .c { text-align: center; }
+  .jgc-invoice .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .jgc-invoice h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.3px; color: #111; }
+  .jgc-invoice .status { display: inline-block; margin-top: 6px; padding: 2px 10px; border-radius: 999px;
+    background: #e8f2fb; color: #1d6fb8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+  .jgc-invoice table.meta { border-collapse: collapse; font-size: 12px; }
+  .jgc-invoice table.meta td { padding: 2px 0; }
+  .jgc-invoice table.meta td:first-child { color: #8a91a0; padding-right: 36px; }
+  .jgc-invoice .parties { display: flex; justify-content: space-between; margin-top: 30px; }
+  .jgc-invoice .party { width: 48%; }
+  .jgc-invoice .party--right { text-align: right; }
+  .jgc-invoice .party h4 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+  .jgc-invoice .party .name { font-size: 17px; font-weight: 700; margin-bottom: 8px; color: #111; }
+  .jgc-invoice table.items { width: 100%; margin-top: 34px; border-collapse: collapse; table-layout: fixed; }
+  .jgc-invoice table.items th { background: #1d7fe0; color: #fff; font-size: 10.5px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.3px; padding: 10px 12px; text-align: left; }
+  .jgc-invoice table.items th.r { text-align: right; }
+  .jgc-invoice table.items th.c { text-align: center; }
+  .jgc-invoice table.items td { padding: 11px 12px; vertical-align: top; overflow-wrap: anywhere; }
+  .jgc-invoice table.items tr.alt td { background: #f2f7fd; }
+  .jgc-invoice table.items tbody tr { border-bottom: 1px solid #eef0f4; }
+  .jgc-invoice .bottom { display: flex; justify-content: space-between; margin-top: 30px; gap: 32px; }
+  .jgc-invoice .info { width: 50%; }
+  .jgc-invoice .info h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+  .jgc-invoice .info p { margin: 0 0 14px; }
+  .jgc-invoice .totals { width: 44%; }
+  .jgc-invoice .totals table { width: 100%; border-collapse: collapse; }
+  .jgc-invoice .totals td { padding: 4px 12px; font-size: 12px; }
+  .jgc-invoice .totals tr.strong td { font-weight: 700; }
+  .jgc-invoice .totals tr.due td { background: #f2f7fd; padding: 12px; font-size: 15px; font-weight: 700; }
+  .jgc-invoice .words { margin-top: 10px; padding: 0 12px; font-size: 10.5px; color: #8a91a0; text-align: right; }
   .jgc-invoice .footer { margin-top: auto; padding-top: 24px; }
 </style>
 <div class="page">
-  <img class="banner banner--header" src="${jgcHeaderSrc}" alt="Jubba Group of Companies" />
+  <img class="banner" src="${jgcHeaderSrc}" alt="Jubba Group of Companies" />
 
   <div class="content">
-  <table class="doc">
-    <colgroup><col style="width:52%" /><col style="width:22%" /><col style="width:26%" /></colgroup>
-    <tr>
-      <td class="label u">ISSUER</td>
-      <td class="title-cell red" colspan="2" rowspan="2">COMMERCIAL INVOICE</td>
-    </tr>
-    <tr>
-      <td>
-        <div class="label u">JUBBA GROUP OF COMPANIES</div>
-        <div>814 MAKKA MUKARAMA STREET WABERI DISTRICT MOGADISHU SOMALIA</div>
-      </td>
-    </tr>
-    <tr>
-      <td class="label">TO: ${escapeHtml((invoice.clientName || '').toUpperCase())}</td>
-      <td class="label">INVOICE NO.</td>
-      <td class="c">${escapeHtml(number)}</td>
-    </tr>
-    <tr>
-      <td class="label u">${escapeHtml((invoice.clientName || '').toUpperCase())}</td>
-      <td class="label">DATE OF ISSUE</td>
-      <td class="c">${escapeHtml(formatDocDate(invoice.createdDate))}</td>
-    </tr>
-    <tr>
-      <td>${escapeHtml(client?.address || '')}</td>
-      <td class="label">DUE DATE</td>
-      <td class="c">${escapeHtml(formatDocDate(invoice.dueDate))}</td>
-    </tr>
-    <tr>
-      <td class="label" colspan="1">STATUS</td>
-      <td colspan="2" class="c" style="text-transform:uppercase">${escapeHtml(
-        payment ? (payment.balanceAfter > 0.005 ? 'Partially paid' : 'Paid') : invoice.status || ''
-      )}</td>
-    </tr>
-    ${payment ? `
-    <tr>
-      <td class="label">PAYMENT ${escapeHtml(`${payment.index} OF ${payment.count}`)}</td>
-      <td colspan="2" class="c" style="text-transform:uppercase">${escapeHtml(
-        [
-          formatDocDate(payment.date),
-          payment.mode,
-          payment.reference,
-          payment.received ? `paid as ${formatMoney(payment.received.amount, payment.received.currency)}` : '',
-        ].filter(Boolean).join(' / ')
-      )}</td>
-    </tr>` : ''}
-    ${invoice.notes ? `<tr><td class="label">NOTES</td><td colspan="2">${escapeHtml(invoice.notes)}</td></tr>` : ''}
-  </table>
+  <div class="top">
+    <div>
+      <h1>Commercial Invoice</h1>
+      ${status ? `<span class="status">${escapeHtml(status)}</span>` : ''}
+    </div>
+    <table class="meta">
+      <tr><td>Invoice no.:</td><td class="r">${escapeHtml(number)}</td></tr>
+      <tr><td>Invoice date:</td><td class="r">${escapeHtml(formatDocDate(invoice.createdDate))}</td></tr>
+      <tr><td>Due:</td><td class="r">${escapeHtml(formatDocDate(invoice.dueDate))}</td></tr>
+      ${!payment && invoice.nextPaymentDate && balanceDue > 0.005 ? `<tr><td>Next payment:</td><td class="r">${escapeHtml(formatDocDate(invoice.nextPaymentDate))}</td></tr>` : ''}
+      ${payment ? `<tr><td>Payment:</td><td class="r">${escapeHtml(`${payment.index} of ${payment.count}`)}</td></tr>` : ''}
+    </table>
+  </div>
 
-  <table class="doc items" style="margin-top:-1px">
+  <div class="parties">
+    <div class="party">
+      <h4>From</h4>
+      <div class="name">Jubba Group of Companies</div>
+      <div>814 Makka Mukarama Street, Waberi District</div>
+      <div>Mogadishu, Somalia</div>
+      <div>Info@jubbagroup.so</div>
+      <div>0619998770 / 0616111139</div>
+    </div>
+    <div class="party party--right">
+      <h4>Bill to</h4>
+      <div class="name">${escapeHtml(invoice.clientName || client?.name || '')}</div>
+      ${client?.company && client.company !== invoice.clientName ? `<div>${escapeHtml(client.company)}</div>` : ''}
+      ${billTo}
+    </div>
+  </div>
+
+  <table class="items">
     <colgroup>
-      <col style="width:9%" /><col style="width:35%" /><col style="width:14%" />
-      <col style="width:10%" /><col style="width:12%" /><col style="width:20%" />
+      <col style="width:38%" /><col style="width:18%" /><col style="width:10%" />
+      <col style="width:12%" /><col style="width:22%" />
     </colgroup>
     <thead>
       <tr>
-        <th>ITEM</th>
-        <th class="desc">Description</th>
-        <th>UNIT<br/>PRICE</th>
-        <th>UNIT</th>
-        <th>QTY</th>
-        <th>AMOUNT</th>
+        <th>Description</th>
+        <th class="r">Rate, ${escapeHtml(code)}</th>
+        <th class="c">Qty</th>
+        <th class="c">Unit</th>
+        <th class="r">Amount, ${escapeHtml(code)}</th>
       </tr>
     </thead>
     <tbody>
-      ${rows || '<tr><td colspan="6" class="c">No items</td></tr>'}
-      ${Number(invoice.discountAmount) > 0 || Number(invoice.taxAmount) > 0 ? `
-      <tr>
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">SUBTOTAL</td>
-        <td class="c">${escapeHtml(code)}</td>
-        <td class="r">${formatDocMoney(invoice.subtotal ?? invoice.amount)}</td>
-      </tr>` : ''}
-      ${Number(invoice.discountAmount) > 0 ? `
-      <tr>
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">DISCOUNT ${escapeHtml(String(invoice.discountPercent || 0))}%</td>
-        <td class="c">${escapeHtml(code)}</td>
-        <td class="r">-${formatDocMoney(invoice.discountAmount)}</td>
-      </tr>` : ''}
-      ${Number(invoice.taxAmount) > 0 ? `
-      <tr>
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">TAX ${escapeHtml(String(invoice.taxRate || 0))}%</td>
-        <td class="c">${escapeHtml(code)}</td>
-        <td class="r">${formatDocMoney(invoice.taxAmount)}</td>
-      </tr>` : ''}
-      <tr class="total-row">
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label red">TOTAL</td>
-        <td class="c red">${escapeHtml(code)}</td>
-        <td class="r red">${formatDocMoney(invoice.amount)}</td>
-      </tr>
-      ${payment ? `
-      ${payment.paidBefore > 0.005 ? `
-      <tr>
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">PAID BEFORE</td>
-        <td class="c">${escapeHtml(code)}</td>
-        <td class="r">${formatDocMoney(payment.paidBefore)}</td>
-      </tr>` : ''}
-      <tr class="total-row">
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">THIS PAYMENT</td>
-        <td class="c">${escapeHtml(code)}</td>
-        <td class="r">${formatDocMoney(payment.amount)}</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label red">BALANCE DUE</td>
-        <td class="c red">${escapeHtml(code)}</td>
-        <td class="r red">${formatDocMoney(payment.balanceAfter)}</td>
-      </tr>` : Number(invoice.amountPaid) > 0 && Number(invoice.amountPaid) < Number(invoice.amount) ? `
-      <tr>
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">PAID</td>
-        <td class="c">${escapeHtml(code)}</td>
-        <td class="r">${formatDocMoney(invoice.amountPaid)}</td>
-      </tr>
-      <tr class="total-row">
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label red">BALANCE DUE</td>
-        <td class="c red">${escapeHtml(code)}</td>
-        <td class="r red">${formatDocMoney(Number(invoice.amount) - Number(invoice.amountPaid))}</td>
-      </tr>
-      ${invoice.nextPaymentDate ? `
-      <tr>
-        <td colspan="2" class="blank"></td>
-        <td colspan="2" class="sum-label">NEXT PAYMENT</td>
-        <td colspan="2" class="r">${escapeHtml(formatDocDate(invoice.nextPaymentDate))}</td>
-      </tr>` : ''}` : ''}
-      <tr class="words-row">
-        <td colspan="2" class="red">AMOUNT IN<br/>WORDS</td>
-        <td colspan="4" class="red">${escapeHtml(amountInWords(invoice.amount, code))}</td>
-      </tr>
+      ${rows || '<tr><td colspan="5" class="c">No items</td></tr>'}
     </tbody>
   </table>
+
+  <div class="bottom">
+    <div class="info">
+      ${payment ? `
+      <h4>Payment received</h4>
+      <p>${[
+        formatDocDate(payment.date),
+        payment.mode,
+        payment.reference,
+        payment.received ? `paid as ${formatMoney(payment.received.amount, payment.received.currency)}` : '',
+      ].filter(Boolean).map(escapeHtml).join('<br/>')}</p>` : ''}
+      ${invoice.notes ? `<h4>Notes</h4><p>${escapeHtml(invoice.notes)}</p>` : ''}
+    </div>
+    <div class="totals">
+      <table>
+        ${sumRow('Subtotal:', money(invoice.subtotal ?? invoice.amount), 'strong')}
+        ${Number(invoice.discountAmount) > 0 ? sumRow(`Discount (${escapeHtml(String(invoice.discountPercent || 0))}%):`, `-${money(invoice.discountAmount)}`) : ''}
+        ${Number(invoice.taxAmount) > 0 ? sumRow(`Tax (${escapeHtml(String(invoice.taxRate || 0))}%):`, money(invoice.taxAmount)) : ''}
+        ${sumRow('Total:', money(invoice.amount), 'strong')}
+        ${payment && payment.paidBefore > 0.005 ? sumRow('Paid before:', money(payment.paidBefore)) : ''}
+        ${payment ? sumRow('This payment:', money(payment.amount)) : sumRow('Amount paid:', money(amountPaid))}
+        ${sumRow('Balance Due:', money(balanceDue), 'due')}
+      </table>
+      <div class="words">${escapeHtml(amountInWords(invoice.amount, code))}</div>
+    </div>
+  </div>
   </div>
 
   <div class="footer">
